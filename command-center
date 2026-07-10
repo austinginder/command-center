@@ -11,6 +11,8 @@
  *   command-center sessions [-p project]      List sessions
  *   command-center projects                   List projects
  *   command-center open <session-id>          Open in browser
+ *   command-center version                    Show installed version
+ *   command-center update [--check]           Update to the latest release
  *
  * Options:
  *   -p, --project <name|path>      Filter by project
@@ -86,6 +88,10 @@ for ( $i = 0; $i < count( $args ); $i++ ) {
 		$flags['no-color'] = true;
 	} elseif ( $arg === '--no-update' ) {
 		$flags['no-update'] = true;
+	} elseif ( $arg === '--check' ) {
+		$flags['check'] = true;
+	} elseif ( in_array( $arg, [ '-v', '--version' ], true ) ) {
+		$flags['version'] = true;
 	} elseif ( in_array( $arg, [ '-h', '--help' ], true ) ) {
 		$flags['help'] = true;
 	} else {
@@ -99,13 +105,17 @@ $limit    = $flags['limit'] ?? 20;
 
 // ─── Subcommand Dispatch ─────────────────────────────────────
 
-$subcommands = [ 'search', 'reindex', 'status', 'sessions', 'projects', 'open', 'flow', 'help' ];
+$subcommands = [ 'search', 'reindex', 'status', 'sessions', 'projects', 'open', 'flow', 'version', 'update', 'help' ];
 $subcommand  = 'search';
 $queryParts  = $positional;
 
 if ( ! empty( $flags['help'] ) || ( isset( $positional[0] ) && $positional[0] === 'help' ) ) {
 	showHelp();
 	exit( 0 );
+}
+
+if ( ! empty( $flags['version'] ) ) {
+	cmdVersion( $useJson );
 }
 
 if ( ! empty( $positional ) && in_array( $positional[0], $subcommands, true ) ) {
@@ -129,6 +139,8 @@ try {
 		'projects' => cmdProjects( $useJson, $useColor, $agent ),
 		'open'     => cmdOpen( $queryParts[0] ?? '' ),
 		'flow'     => cmdFlow( $queryParts[0] ?? '', $flags, $useJson, $useColor ),
+		'version'  => cmdVersion( $useJson ),
+		'update'   => cmdUpdate( $flags, $useJson, $useColor ),
 		default    => cmdSearch( implode( ' ', $queryParts ), $flags, $limit, $useJson, $useColor, $agent ),
 	};
 } catch ( \Exception $e ) {
@@ -287,6 +299,176 @@ function cmdOpen( string $sessionId ): void {
 	exec( 'open ' . escapeshellarg( $url ) );
 	echo "Opened {$sessionId}\n";
 	exit( 0 );
+}
+
+// ─── Version & Update ────────────────────────────────────────
+
+function localManifest(): array {
+	$file = BASE_DIR . '/manifest.json';
+	if ( ! is_readable( $file ) ) {
+		fwrite( STDERR, "Missing manifest.json - is this a complete install?\n" );
+		exit( 3 );
+	}
+	$manifest = json_decode( file_get_contents( $file ), true );
+	if ( ! is_array( $manifest ) || empty( $manifest['version'] ) ) {
+		fwrite( STDERR, "Invalid manifest.json.\n" );
+		exit( 3 );
+	}
+	return $manifest;
+}
+
+function remoteManifest(): ?array {
+	$context = stream_context_create( [
+		'http' => [
+			'timeout' => 15,
+			'header'  => "Accept: application/json\r\nUser-Agent: command-center-cli\r\n",
+		],
+	] );
+	$body = @file_get_contents( 'https://raw.githubusercontent.com/austinginder/command-center/main/manifest.json', false, $context );
+	if ( $body === false ) {
+		return null;
+	}
+	$manifest = json_decode( $body, true );
+	if ( ! is_array( $manifest ) || empty( $manifest['version'] ) ) {
+		return null;
+	}
+	return $manifest;
+}
+
+function cmdVersion( bool $useJson ): void {
+	$manifest = localManifest();
+	if ( $useJson ) {
+		echo json_encode( $manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) . "\n";
+	} else {
+		echo "Command Center v{$manifest['version']}\n";
+	}
+	exit( 0 );
+}
+
+function cmdUpdate( array $flags, bool $useJson, bool $useColor ): void {
+	$local  = localManifest();
+	$remote = remoteManifest();
+
+	if ( $remote === null ) {
+		fwrite( STDERR, "Could not reach GitHub to check for updates.\n" );
+		exit( 3 );
+	}
+
+	$current = $local['version'];
+	$latest  = $remote['version'];
+
+	if ( ! version_compare( $latest, $current, '>' ) ) {
+		if ( $useJson ) {
+			echo json_encode( [ 'current' => $current, 'latest' => $latest, 'update_available' => false ], JSON_PRETTY_PRINT ) . "\n";
+		} else {
+			echo "Already up to date (v{$current}).\n";
+		}
+		exit( 0 );
+	}
+
+	if ( ! empty( $remote['requires_php'] ) && version_compare( PHP_VERSION, $remote['requires_php'], '<' ) ) {
+		fwrite( STDERR, "v{$latest} requires PHP {$remote['requires_php']}+ (you have " . PHP_VERSION . ").\n" );
+		exit( 3 );
+	}
+
+	if ( ! empty( $flags['check'] ) ) {
+		if ( $useJson ) {
+			echo json_encode( [ 'current' => $current, 'latest' => $latest, 'update_available' => true ], JSON_PRETTY_PRINT ) . "\n";
+		} else {
+			echo "Update available: v{$current} → v{$latest}\n";
+			echo "Run " . bold( 'command-center update', $useColor ) . " to install.\n";
+		}
+		exit( 0 );
+	}
+
+	echo "Updating v{$current} → v{$latest}...\n";
+
+	if ( is_dir( BASE_DIR . '/.git' ) ) {
+		updateViaGit();
+	} else {
+		updateViaZip( $remote );
+	}
+
+	$new = json_decode( file_get_contents( BASE_DIR . '/manifest.json' ), true );
+	echo "Updated to v" . ( $new['version'] ?? $latest ) . ".\n";
+	exit( 0 );
+}
+
+function updateViaGit(): void {
+	exec( 'git -C ' . escapeshellarg( BASE_DIR ) . ' status --porcelain 2>&1', $dirty, $code );
+	if ( $code !== 0 ) {
+		fwrite( STDERR, "git status failed - update manually with git pull.\n" );
+		exit( 3 );
+	}
+	if ( ! empty( $dirty ) ) {
+		fwrite( STDERR, "Working tree has local changes - commit or stash them, then run update again.\n" );
+		exit( 3 );
+	}
+	exec( 'git -C ' . escapeshellarg( BASE_DIR ) . ' pull --ff-only origin main 2>&1', $out, $code );
+	if ( $code !== 0 ) {
+		fwrite( STDERR, "git pull failed:\n" . implode( "\n", $out ) . "\n" );
+		exit( 3 );
+	}
+}
+
+function updateViaZip( array $remote ): void {
+	if ( empty( $remote['download_url'] ) ) {
+		fwrite( STDERR, "Remote manifest has no download_url.\n" );
+		exit( 3 );
+	}
+	if ( ! class_exists( 'ZipArchive' ) ) {
+		fwrite( STDERR, "PHP zip extension is required for non-git updates.\n" );
+		exit( 3 );
+	}
+
+	$tmpZip = tempnam( sys_get_temp_dir(), 'cc-update-' ) . '.zip';
+	$context = stream_context_create( [ 'http' => [ 'timeout' => 60, 'header' => "User-Agent: command-center-cli\r\n", 'follow_location' => 1 ] ] );
+	$data = @file_get_contents( $remote['download_url'], false, $context );
+	if ( $data === false || file_put_contents( $tmpZip, $data ) === false ) {
+		fwrite( STDERR, "Download failed: {$remote['download_url']}\n" );
+		exit( 3 );
+	}
+
+	$tmpDir = sys_get_temp_dir() . '/cc-update-' . getmypid();
+	$zip    = new ZipArchive();
+	if ( $zip->open( $tmpZip ) !== true || ! $zip->extractTo( $tmpDir ) ) {
+		fwrite( STDERR, "Could not extract update archive.\n" );
+		exit( 3 );
+	}
+	$zip->close();
+	unlink( $tmpZip );
+
+	// GitHub tag archives wrap everything in a single top-level directory.
+	$entries = array_values( array_diff( scandir( $tmpDir ), [ '.', '..' ] ) );
+	$root    = ( count( $entries ) === 1 && is_dir( "{$tmpDir}/{$entries[0]}" ) ) ? "{$tmpDir}/{$entries[0]}" : $tmpDir;
+
+	copyTree( $root, BASE_DIR );
+
+	exec( 'rm -rf ' . escapeshellarg( $tmpDir ) );
+}
+
+function copyTree( string $src, string $dest ): void {
+	// Never touch local data (search index, caches) or version control.
+	$skip = [ 'data', '.git' ];
+	foreach ( array_diff( scandir( $src ), [ '.', '..' ] ) as $entry ) {
+		if ( in_array( $entry, $skip, true ) ) {
+			continue;
+		}
+		$from = "{$src}/{$entry}";
+		$to   = "{$dest}/{$entry}";
+		if ( is_dir( $from ) ) {
+			if ( ! is_dir( $to ) ) {
+				mkdir( $to, 0755, true );
+			}
+			copyTree( $from, $to );
+		} else {
+			copy( $from, $to );
+			// Preserve executability (the CLI script itself).
+			if ( is_executable( $from ) ) {
+				chmod( $to, 0755 );
+			}
+		}
+	}
 }
 
 // ─── Flow ────────────────────────────────────────────────────
@@ -650,6 +832,9 @@ Usage:
   command-center projects                   List projects
   command-center open <session-id>          Open in browser
   command-center flow <project>             Reconstruct how a project was built (cliffnotes)
+  command-center version                    Show installed version
+  command-center update                     Update to the latest release
+  command-center update --check             Check for updates without installing
 
 Flow options:
   -s, --session <id>             Deep-dive one session instead of the whole project
@@ -667,6 +852,7 @@ Search options:
   -j, --json                     JSON output
       --no-color                 Disable ANSI colors
       --no-update                Skip incremental index update
+  -v, --version                  Show installed version
   -h, --help                     Show this help
 
 Available agents:

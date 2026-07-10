@@ -66,6 +66,16 @@ command-center status                    # index health
 
 Full CLI reference: [command-center-cli.md](command-center-cli.md).
 
+### Updating
+
+```bash
+command-center version          # installed version
+command-center update --check   # is a newer release available?
+command-center update           # update in place
+```
+
+`update` compares the local `manifest.json` against the latest release manifest on GitHub. Git installs are updated with a fast-forward pull (it refuses if the working tree has local changes). Non-git installs download the release archive and copy it over the install, leaving `data/` untouched.
+
 ## API
 
 Everything the UI does is available as JSON under `/api`:
@@ -87,7 +97,7 @@ GET  /stream?session={id}              SSE replay of a session
 Your conversation history is sensitive. Command Center is designed to be run **locally only**:
 
 - All transcript reads and the FTS index live on your machine (`data/` - gitignored).
-- No analytics, no phone-home, no external requests from the backend. (The UI shell loads Tailwind, marked.js, and fonts from CDNs.)
+- No analytics, no phone-home, no external requests from the backend. (The UI shell loads Tailwind, marked.js, and fonts from CDNs. `command-center update` contacts GitHub, but only when you run it.)
 - Don't host it on a public server unless you put authentication in front of it - the app itself has none.
 
 ## Adding a provider

@@ -2,6 +2,14 @@
 
 All notable changes to Command Center are documented here.
 
+## [1.2.0] - 2026-07-10
+
+### Added
+
+- **`command-center version`** (and `-v`/`--version`) - show the installed version, read from the new `manifest.json` at the repo root. `--json` prints the full manifest.
+- **`command-center update`** - self-update to the latest release. Fetches the release manifest from GitHub and compares versions; git installs update via `git pull --ff-only` (refusing if the working tree has local changes), non-git installs download the release archive and copy it over the install. `data/` is never touched. `--check` reports whether an update is available without installing.
+- `manifest.json` - release metadata (version, download URL, PHP requirement) committed with each release, following the update-check pattern used by Disembark.
+
 ## [1.1.0] - 2026-07-10
 
 ### Changed

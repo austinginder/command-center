@@ -154,6 +154,31 @@ The `--json` output is designed as an ingest format for a public "browse how it 
 site (GitHub-for-AI-builds): project → span → totals → models → tokens → steering → spine →
 corrections → per-session breakdown.
 
+### version
+
+Show the installed version (read from `manifest.json`).
+
+```bash
+command-center version
+command-center -v
+command-center version --json   # full manifest
+```
+
+### update
+
+Check for and install the latest release. Compares the local `manifest.json` against
+the latest on GitHub.
+
+```bash
+command-center update --check   # report only, install nothing
+command-center update           # update in place
+```
+
+Git installs are updated with `git pull --ff-only` - if the working tree has local
+changes, the update refuses and leaves everything alone. Non-git installs download
+the release archive and copy it over the install. `data/` (your search index) is
+never touched either way.
+
 ## Options
 
 | Flag | Short | Description |
@@ -166,6 +191,8 @@ corrections → per-session breakdown.
 | `--json` | `-j` | JSON output |
 | `--no-color` | | Disable ANSI colors |
 | `--no-update` | | Skip incremental index update |
+| `--check` | | Update: check only, do not install |
+| `--version` | `-v` | Show installed version |
 | `--help` | `-h` | Show help |
 
 ## Exit Codes
