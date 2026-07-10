@@ -40,19 +40,19 @@ Command Center is a plain PHP app (PHP 8.1+ with the `sqlite3` extension — no 
 
 ```bash
 cove add command-center --plain
-site="$(cove path command-center)"
-rm -rf "$site"
-git clone https://github.com/austinginder/command-center.git "$site"
+cd "$(cove path command-center)"
+rm index.php   # Cove's placeholder landing page
+git clone https://github.com/austinginder/command-center.git .
 ```
 
 Then open **https://command-center.localhost** — sessions appear immediately, and the search index builds on first deep search (or click the refresh button next to the project filter).
 
 ### CLI
 
-Symlink the bundled script onto your `$PATH`:
+Symlink the bundled script onto your `$PATH` (from the site directory):
 
 ```bash
-ln -s "$(cove path command-center)/command-center" ~/.local/bin/command-center
+ln -s "$(pwd)/command-center" ~/.local/bin/command-center
 ```
 
 ```bash
