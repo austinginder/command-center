@@ -116,6 +116,24 @@ function usageSummary(usage) {
     return formatTokens(usage.input) + ' in / ' + formatTokens(usage.output) + ' out';
 }
 
+// Display name for a project path. Generic leaf dirs (public/, src/, ...)
+// are ambiguous on their own, so include the parent: "anchor.localhost/public".
+const GENERIC_DIRS = new Set(['public', 'src', 'app', 'www', 'html', 'dist', 'build', 'site']);
+function projectLabel(path) {
+    const parts = String(path || '').split('/').filter(Boolean);
+    if (!parts.length) return path || '';
+    const last = parts[parts.length - 1];
+    if (parts.length > 1 && GENERIC_DIRS.has(last.toLowerCase())) {
+        return parts[parts.length - 2] + '/' + last;
+    }
+    return last;
+}
+
+// Home-relative form of a path for secondary display lines.
+function shortPath(path) {
+    return String(path || '').replace(/^\/Users\/[^/]+\//, '~/');
+}
+
 // ─── Sources ─────────────────────────────────────────────────
 const SOURCE_COLORS = {
 	amp:         'bg-lime-500/10 text-lime-700 dark:text-lime-400 border-lime-500/20',
@@ -265,9 +283,15 @@ function renderDashboard() {
             <div class="flex flex-wrap items-center gap-2">
                 <div id="source-pills" class="flex flex-wrap items-center gap-1.5"></div>
                 <div class="ml-auto flex items-center gap-2">
-                    <select id="session-project-filter" class="rounded-lg border border-zinc-200 dark:border-cc-line bg-white dark:bg-cc-card text-zinc-700 dark:text-cc-soft px-2 py-1.5 text-xs max-w-[220px]">
-                        <option value="">All projects</option>
-                    </select>
+                    <div id="project-combo" class="relative">
+                        <input type="text" id="project-filter-input" autocomplete="off" spellcheck="false" placeholder="All projects"
+                            class="w-56 rounded-lg border border-zinc-200 dark:border-cc-line bg-white dark:bg-cc-card text-zinc-700 dark:text-cc-soft placeholder:text-zinc-400 dark:placeholder:text-cc-dim px-2.5 py-1.5 text-xs">
+                        <button id="project-clear-btn" type="button" title="Clear project filter"
+                            class="hidden absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-zinc-400 dark:text-cc-dim hover:text-zinc-600 dark:hover:text-cc-mut">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                        <div id="project-combo-list" class="hidden absolute right-0 z-30 mt-1 w-96 max-h-80 overflow-y-auto rounded-lg border border-zinc-200 dark:border-cc-line3 bg-white dark:bg-cc-card shadow-xl"></div>
+                    </div>
                     <button id="reindex-btn" title="Rebuild search index" class="p-1.5 rounded-lg border border-zinc-200 dark:border-cc-line bg-white dark:bg-cc-card text-zinc-400 hover:text-zinc-600 dark:hover:text-cc-soft transition-colors">
                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                     </button>
@@ -308,9 +332,11 @@ function renderDashboard() {
     let shown = PAGE_SIZE;
     let dailyStats = {};       // 'YYYY-MM-DD' -> {sessions, tokens_in, tokens_out, tokens_cache}
     let dayFilter = '';        // 'YYYY-MM-DD' - set by clicking a heatmap cell
+    let allProjects = [];      // [{path, name, sessions, latest}]
+    let activeProject = '';    // project path filter ('' = all)
 
     const searchInput = document.getElementById('session-search');
-    const projectSelect = document.getElementById('session-project-filter');
+    const projectInput = document.getElementById('project-filter-input');
 
     // Restore state from URL query params.
     const urlParams = new URLSearchParams(location.search);
@@ -325,7 +351,7 @@ function renderDashboard() {
         const q = searchInput.value.trim();
         if (q) params.set('q', q);
         if (deepResults) params.set('deep', '1');
-        if (projectSelect.value) params.set('project', projectSelect.value);
+        if (activeProject) params.set('project', activeProject);
         if (activeSource) params.set('source', activeSource);
         if (dayFilter) params.set('day', dayFilter);
         const qs = params.toString();
@@ -341,26 +367,94 @@ function renderDashboard() {
 
     async function loadProjects() {
         try {
-            const projects = await (await fetch('/api/sessions/projects')).json();
-            const prev = projectSelect.value;
-            projectSelect.innerHTML = '<option value="">All projects</option>';
-            projects.forEach(p => {
-                const opt = document.createElement('option');
-                opt.value = p.path;
-                opt.textContent = p.name + ' (' + p.sessions + ')';
-                projectSelect.appendChild(opt);
+            allProjects = await (await fetch('/api/sessions/projects')).json();
+        } catch (err) { allProjects = []; }
+    }
+
+    // ── Project combobox ──
+    let comboHighlight = -1;
+    let comboItems = [];   // paths currently listed ('' = All projects)
+
+    function comboItemHtml(path, label, sub, count, idx) {
+        const active = idx === comboHighlight;
+        const base = active ? 'bg-zinc-100 dark:bg-cc-panel' : '';
+        return `<div class="combo-item px-3 py-1.5 cursor-pointer hover:bg-zinc-100 dark:hover:bg-cc-panel ${base}" data-path="${esc(path)}" data-idx="${idx}">
+            <div class="flex items-baseline justify-between gap-3">
+                <span class="text-xs truncate text-zinc-800 dark:text-cc-ink">${esc(label)}</span>
+                ${count !== null ? `<span class="text-[10px] font-mono shrink-0 text-zinc-400 dark:text-cc-dim">${count}</span>` : ''}
+            </div>
+            ${sub ? `<div class="text-[10px] font-mono truncate text-zinc-400 dark:text-cc-dim">${esc(sub)}</div>` : ''}
+        </div>`;
+    }
+
+    function renderComboList(filter) {
+        const listEl = document.getElementById('project-combo-list');
+        if (!listEl) return;
+        const q = (filter || '').trim().toLowerCase();
+        const matches = allProjects.filter(p =>
+            !q || projectLabel(p.path).toLowerCase().includes(q) || p.path.toLowerCase().includes(q)
+        );
+
+        comboItems = [''].concat(matches.slice(0, 150).map(p => p.path));
+        let html = comboItemHtml('', 'All projects', '', null, 0);
+        matches.slice(0, 150).forEach((p, i) => {
+            html += comboItemHtml(p.path, projectLabel(p.path), shortPath(p.path), p.sessions, i + 1);
+        });
+        if (!matches.length && q) {
+            html += '<div class="px-3 py-2 text-xs text-zinc-400 dark:text-cc-dim">no projects match</div>';
+        }
+        listEl.innerHTML = html;
+
+        // mousedown beats the input blur that closes the list.
+        listEl.querySelectorAll('.combo-item').forEach(item => {
+            item.addEventListener('mousedown', e => {
+                e.preventDefault();
+                selectProject(item.dataset.path);
             });
-            if (prev && [...projectSelect.options].some(o => o.value === prev)) {
-                projectSelect.value = prev;
-            }
-        } catch (err) {}
+        });
+    }
+
+    function openCombo(filter) {
+        comboHighlight = -1;
+        renderComboList(filter);
+        document.getElementById('project-combo-list').classList.remove('hidden');
+    }
+
+    function closeCombo() {
+        document.getElementById('project-combo-list')?.classList.add('hidden');
+        comboHighlight = -1;
+    }
+
+    function syncProjectInput() {
+        projectInput.value = activeProject ? projectLabel(activeProject) : '';
+        projectInput.title = activeProject ? shortPath(activeProject) : '';
+        document.getElementById('project-clear-btn')?.classList.toggle('hidden', !activeProject);
+    }
+
+    async function selectProject(path) {
+        closeCombo();
+        projectInput.blur();
+        if (path === activeProject) { syncProjectInput(); return; }
+        activeProject = path || '';
+        syncProjectInput();
+        shown = PAGE_SIZE;
+        await loadSessions();
+        renderHeatmap();   // counts update instantly; token sums follow
+        loadDailyStats();
+        renderPills();
+        if (deepResults) {
+            doDeepSearch();
+        } else {
+            updateURL();
+            renderList();
+        }
     }
 
     async function loadSessions() {
         const container = document.getElementById('sessions-list');
         try {
             const params = new URLSearchParams();
-            if (projectSelect.value) params.set('project', projectSelect.value);
+            if (activeProject) params.set('project', activeProject);
             const qs = params.toString();
             allSessions = await (await fetch('/api/sessions' + (qs ? '?' + qs : ''))).json();
         } catch (err) {
@@ -373,7 +467,7 @@ function renderDashboard() {
     async function loadDailyStats() {
         try {
             const params = new URLSearchParams();
-            if (projectSelect.value) params.set('project', projectSelect.value);
+            if (activeProject) params.set('project', activeProject);
             if (activeSource) params.set('source', activeSource);
             const qs = params.toString();
             const rows = await (await fetch('/api/sessions/stats/daily' + (qs ? '?' + qs : ''))).json();
@@ -467,7 +561,9 @@ function renderDashboard() {
 
         const width = LEFT + (week + 1) * PITCH;
         const height = TOP + 7 * PITCH;
-        wrap.innerHTML = `<svg width="${width}" height="${height}" role="img" aria-label="Session activity for ${today.getFullYear()}">${labels}${rects}</svg>`;
+        // viewBox + width:100% scales the grid up to fill the card on wide
+        // screens; min-width keeps it scrollable (not shrunken) on small ones.
+        wrap.innerHTML = `<svg viewBox="0 0 ${width} ${height}" style="width:100%;min-width:${width}px;height:auto;display:block" role="img" aria-label="Session activity for ${today.getFullYear()}">${labels}${rects}</svg>`;
         wrap.scrollLeft = wrap.scrollWidth;
 
         const totalEl = document.getElementById('heatmap-total');
@@ -594,7 +690,8 @@ function renderDashboard() {
         if (q) {
             list = list.filter(s =>
                 (s.display || '').toLowerCase().includes(q) ||
-                (s.projectName || '').toLowerCase().includes(q)
+                (s.projectName || '').toLowerCase().includes(q) ||
+                (s.project || '').toLowerCase().includes(q)
             );
         }
         return list;
@@ -614,7 +711,7 @@ function renderDashboard() {
              data-session-id="${esc(s.id)}" data-source="${esc(src)}">
             ${sourceBadge(src, s.sourceLabel)}
             <span class="flex-1 min-w-0 truncate text-sm text-zinc-800 dark:text-cc-ink" title="${esc(title)}">${esc(title)}</span>
-            <span class="hidden md:block max-w-[180px] truncate text-xs font-mono text-zinc-400 dark:text-cc-dim">${esc(s.projectName || '')}</span>
+            <span class="hidden md:block max-w-[240px] truncate text-xs font-mono text-zinc-400 dark:text-cc-dim" title="${esc(shortPath(s.project) || '')}">${esc(projectLabel(s.project) || s.projectName || '')}</span>
             <span class="hidden sm:block w-20 text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap">${s.size ? formatBytes(s.size) : ''}</span>
             <span class="text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap" style="width:4.5rem">${s.timestamp_s ? clockTime(s.timestamp_s) : ''}</span>
             ${copyBtnHtml(src, s.project, s.id)}
@@ -722,7 +819,7 @@ function renderDashboard() {
                 <div class="flex items-center gap-2.5 min-w-0">
                     ${sourceBadge(src, s.sourceLabel)}
                     <span class="flex-1 min-w-0 truncate text-sm font-medium text-zinc-800 dark:text-cc-ink">${esc(s.display || s.id)}</span>
-                    <span class="hidden sm:block max-w-[160px] truncate text-xs font-mono text-zinc-400 dark:text-cc-dim">${esc(s.projectName || '')}</span>
+                    <span class="hidden sm:block max-w-[220px] truncate text-xs font-mono text-zinc-400 dark:text-cc-dim" title="${esc(shortPath(s.project) || '')}">${esc(projectLabel(s.project) || s.projectName || '')}</span>
                     <span class="text-xs font-mono text-zinc-400 dark:text-cc-dim whitespace-nowrap shrink-0">${s.timestamp_s ? timeAgo(s.timestamp_s) : ''}</span>
                     ${copyBtnHtml(src, s.project, s.id)}
                 </div>
@@ -783,7 +880,7 @@ function renderDashboard() {
         try {
             const params = new URLSearchParams();
             params.set('q', q);
-            if (projectSelect.value) params.set('project', projectSelect.value);
+            if (activeProject) params.set('project', activeProject);
             if (activeSource) params.set('source', activeSource);
             const res = await fetch('/api/sessions/search?' + params.toString());
             if (!res.ok) throw new Error('Search failed');
@@ -799,18 +896,45 @@ function renderDashboard() {
     }
 
     // ── Events ──
-    projectSelect.addEventListener('change', async () => {
-        shown = PAGE_SIZE;
-        await loadSessions();
-        loadDailyStats();
-        renderPills();
-        if (deepResults) {
-            doDeepSearch();
-        } else {
-            updateURL();
-            renderList();
+    projectInput.addEventListener('focus', () => {
+        projectInput.select();
+        openCombo('');
+    });
+
+    projectInput.addEventListener('input', () => {
+        openCombo(projectInput.value);
+    });
+
+    projectInput.addEventListener('blur', () => {
+        // Delay so a mousedown on a list item can fire first.
+        setTimeout(() => { closeCombo(); syncProjectInput(); }, 120);
+    });
+
+    projectInput.addEventListener('keydown', e => {
+        const listEl = document.getElementById('project-combo-list');
+        const open = listEl && !listEl.classList.contains('hidden');
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (!open) { openCombo(projectInput.value); return; }
+            const dir = e.key === 'ArrowDown' ? 1 : -1;
+            comboHighlight = Math.max(0, Math.min(comboItems.length - 1, comboHighlight + dir));
+            renderComboList(projectInput.value);
+            listEl.querySelector(`[data-idx="${comboHighlight}"]`)?.scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (!open) return;
+            // Highlighted item wins; otherwise the first real match.
+            const pick = comboHighlight >= 0 ? comboItems[comboHighlight]
+                : (comboItems.length > 1 ? comboItems[1] : '');
+            selectProject(pick);
+        } else if (e.key === 'Escape') {
+            closeCombo();
+            syncProjectInput();
+            projectInput.blur();
         }
     });
+
+    document.getElementById('project-clear-btn').addEventListener('click', () => selectProject(''));
 
     searchInput.addEventListener('input', () => {
         updateDeepSearchBtn();
@@ -861,8 +985,9 @@ function renderDashboard() {
     (async () => {
         await loadSources();
         await loadProjects();
-        if (initialProject && [...projectSelect.options].some(o => o.value === initialProject)) {
-            projectSelect.value = initialProject;
+        if (initialProject) {
+            activeProject = initialProject;
+            syncProjectInput();
         }
         await loadSessions();
         renderPills();
@@ -932,7 +1057,7 @@ function renderSessionView(sessionId) {
             const meta = document.getElementById('session-meta');
             if (meta) {
                 const parts = [];
-                if (s.projectName) parts.push(s.projectName);
+                if (s.project || s.projectName) parts.push(projectLabel(s.project) || s.projectName);
                 if (s.timestamp_s) parts.push(new Date(s.timestamp_s * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }));
                 if (s.size) parts.push(formatBytes(s.size));
                 meta.textContent = parts.join(' · ');
