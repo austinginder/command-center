@@ -11,7 +11,7 @@ Initial public release.
 - **Unified session index** across seven AI coding tools: Claude Code, Command Code, T3 Code, OpenCode, Kimi CLI, Antigravity, and Grok CLI - one dashboard for every conversation on your machine.
 - **Deep search** powered by a SQLite FTS5 full-text index over conversation content, with per-source and per-project filtering, snippets, and match highlighting.
 - **Session viewer** that replays any conversation - user messages, assistant text, collapsible tool-call groups, and turn summaries - with one-click copy of the CLI resume command.
-- **Activity heatmap** (GitHub contribution-graph style) showing sessions per day for the past year, with hover tooltips including per-day token usage.
+- **Activity heatmap** (GitHub contribution-graph style) showing sessions per day for the past year, with hover tooltips including per-day token usage. Click a day to filter the session list to it.
 - **Token usage tracking** for providers that record it (Claude Code, OpenCode, Kimi), stored in the search index and backfillable for existing sessions via `POST /api/sessions/tokens/backfill`.
 - **`command-center` CLI** - search, list sessions/projects, reindex, open a session in the browser, and `flow`: reconstruct how a project was built from its session transcripts (cliffnotes, forensic play-by-play, or structured JSON).
 - JSON API: sessions, projects, sources, deep search, daily stats, conversation fetch, and an SSE stream endpoint.
