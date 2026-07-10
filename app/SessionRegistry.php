@@ -33,6 +33,7 @@ class SessionRegistry {
 	 */
 	public static function providers(): array {
 		return [
+			'amp'         => 'AmpSessions',
 			'claude'      => 'ClaudeSessions',
 			'commandcode' => 'CommandCodeSessions',
 			't3code'      => 'T3CodeSessions',
@@ -230,7 +231,7 @@ class SessionRegistry {
 			// Fall back to Claude's legacy grep path - non-Claude providers have no
 			// equivalent, so they return empty when FTS is broken rather than
 			// surfacing Claude results under the wrong source.
-			if ( in_array( $source, [ 't3code', 'kimi', 'opencode', 'antigravity', 'grok' ], true ) ) {
+			if ( in_array( $source, [ 'amp', 't3code', 'kimi', 'opencode', 'antigravity', 'grok' ], true ) ) {
 				return [];
 			}
 			return ClaudeSessions::deepSearch( $query, $project );

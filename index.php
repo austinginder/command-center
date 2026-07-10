@@ -4,6 +4,7 @@ define( 'BASE_DIR', __DIR__ );
 define( 'DATA_DIR', __DIR__ . '/data' );
 
 require BASE_DIR . '/app/Helpers.php';
+require BASE_DIR . '/app/AmpSessions.php';
 require BASE_DIR . '/app/ClaudeSessions.php';
 require BASE_DIR . '/app/T3CodeSessions.php';
 require BASE_DIR . '/app/OpenCodeSessions.php';

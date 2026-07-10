@@ -124,6 +124,8 @@ details.tool-group[open] > summary .tool-group-label::before { content: '▾ '; 
 .dark .hm-l3 { fill: #16a866; }
 .dark .hm-l4 { fill: #42e39b; }
 .hm-cell { cursor: pointer; }
+.hm-future { fill: #fafafa; }
+.dark .hm-future { fill: #10140f; }
 .hm-cell:hover { stroke: rgba(24, 24, 27, 0.5); stroke-width: 1; }
 .dark .hm-cell:hover { stroke: rgba(244, 244, 245, 0.6); }
 .hm-selected, .hm-selected:hover { stroke: #18181b; stroke-width: 1.5; }

@@ -118,6 +118,7 @@ function usageSummary(usage) {
 
 // ─── Sources ─────────────────────────────────────────────────
 const SOURCE_COLORS = {
+	amp:         'bg-lime-500/10 text-lime-700 dark:text-lime-400 border-lime-500/20',
     t3code:      'bg-purple-500/10 text-purple-500 border-purple-500/20',
     opencode:    'bg-blue-500/10 text-blue-500 border-blue-500/20',
     claude:      'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
@@ -128,6 +129,7 @@ const SOURCE_COLORS = {
 };
 
 const SOURCE_DOTS = {
+	amp:         'bg-lime-500',
     t3code:      'bg-purple-500',
     opencode:    'bg-blue-500',
     claude:      'bg-emerald-500',
@@ -145,6 +147,7 @@ function sourceBadge(source, label) {
 
 // CLI resume recipes per source. Sources absent here can't be resumed.
 const RESUME_BINS = {
+	amp:         { bin: 'amp',    flag: '',                               resume: 'threads continue' },
     claude:      { bin: 'claude', flag: '--dangerously-skip-permissions', resume: '--resume' },
     commandcode: { bin: 'cmd',    flag: '--yolo',                         resume: '--resume' },
     antigravity: { bin: 'agy',    flag: '--dangerously-skip-permissions', resume: '--conversation' },
@@ -439,6 +442,16 @@ function renderDashboard() {
                 width="${CELL}" height="${CELL}" rx="2" data-day="${key}" data-count="${n}"
                 data-tin="${s ? s.tokens_in : 0}" data-tout="${s ? s.tokens_out : 0}"
                 aria-label="${n} session${n !== 1 ? 's' : ''} on ${key}"></rect>`;
+        }
+
+        // Pad the final week with blacked-out future days so the grid edge
+        // stays square. Not .hm-cell, so tooltip/click handlers skip them.
+        const pad = new Date(today);
+        pad.setDate(pad.getDate() + 1);
+        while (pad.getDay() !== 0) {
+            rects += `<rect class="hm-future" x="${LEFT + week * PITCH}" y="${TOP + pad.getDay() * PITCH}"
+                width="${CELL}" height="${CELL}" rx="2" aria-hidden="true"></rect>`;
+            pad.setDate(pad.getDate() + 1);
         }
 
         // Drop the first month label when the next one crowds it out.

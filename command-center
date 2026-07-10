@@ -31,6 +31,7 @@ define( 'BASE_DIR', __DIR__ );
 define( 'DATA_DIR', __DIR__ . '/data' );
 
 require BASE_DIR . '/app/Helpers.php';
+require BASE_DIR . '/app/AmpSessions.php';
 require BASE_DIR . '/app/ClaudeSessions.php';
 require BASE_DIR . '/app/CommandCodeSessions.php';
 require BASE_DIR . '/app/T3CodeSessions.php';
@@ -554,6 +555,7 @@ function resolveAgent( ?string $input ): ?string {
 
 	// Friendly-name mapping (supports hyphenated and non-hyphenated variants).
 	$map = [
+		'amp'           => 'amp',
 		'claude'        => 'claude',
 		'claude-code'   => 'claude',
 		'claudecode'    => 'claude',
@@ -587,7 +589,7 @@ function resolveAgent( ?string $input ): ?string {
 	}
 
 	fwrite( STDERR, "Unknown agent: {$input}\n" );
-	fwrite( STDERR, "Available: claude (Claude Code), commandcode (Command Code), t3code (T3 Code), opencode (OpenCode), kimi (Kimi), antigravity (Antigravity), grok (Grok Code)\n" );
+	fwrite( STDERR, "Available: amp, claude (Claude Code), commandcode (Command Code), t3code (T3 Code), opencode (OpenCode), kimi (Kimi), antigravity (Antigravity), grok (Grok Code)\n" );
 	exit( 2 );
 }
 

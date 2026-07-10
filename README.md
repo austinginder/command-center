@@ -4,12 +4,13 @@ A local dashboard + CLI for browsing and searching your AI coding sessions - eve
 
 If you bounce between AI coding CLIs, your conversation history ends up scattered across half a dozen dot-directories. Command Center indexes all of them into a single searchable timeline: skim what you worked on each day, deep-search full conversation content, replay any session, and copy a ready-to-run resume command.
 
-**Everything stays on your machine.** Command Center only reads local transcript files and builds its search index in a local SQLite database. Nothing is uploaded anywhere.
+**Your index stays on your machine.** Command Center reads local transcript files and builds its search index in a local SQLite database. For current Amp threads, it uses the installed `amp` CLI to list and download your own thread exports on demand. Command Center does not upload conversation data anywhere.
 
 ## Supported tools
 
 | Tool | Reads from | Token usage |
 |---|---|---|
+| Amp | Local snapshots + `amp threads` | ✅ |
 | Claude Code | `~/.claude` | ✅ |
 | OpenCode | `$XDG_DATA_HOME/opencode` | ✅ |
 | Kimi CLI | `~/.kimi` | ✅ |
@@ -18,7 +19,7 @@ If you bounce between AI coding CLIs, your conversation history ends up scattere
 | Antigravity | `~/.gemini/antigravity-cli/brain` | - |
 | Grok CLI | `~/.grok` | - |
 
-Tools you don't use are skipped automatically. Each location can be overridden with an env var (`CLAUDE_HOME`, `OPENCODE_HOME`, `KIMI_HOME`, `COMMANDCODE_HOME`, `T3CODE_HOME`, `ANTIGRAVITY_HOME`, `GROK_HOME`).
+Tools you don't use are skipped automatically. Each location can be overridden with an env var (`AMP_HOME`, `CLAUDE_HOME`, `OPENCODE_HOME`, `KIMI_HOME`, `COMMANDCODE_HOME`, `T3CODE_HOME`, `ANTIGRAVITY_HOME`, `GROK_HOME`).
 
 ## Features
 
