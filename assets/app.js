@@ -334,6 +334,7 @@ function renderDashboard() {
     let dayFilter = '';        // 'YYYY-MM-DD' - set by clicking a heatmap cell
     let allProjects = [];      // [{path, name, sessions, latest}]
     let activeProject = '';    // project path filter ('' = all)
+    let sessionsLoaded = false; // first /api/sessions fetch has resolved
 
     const searchInput = document.getElementById('session-search');
     const projectInput = document.getElementById('project-filter-input');
@@ -461,6 +462,7 @@ function renderDashboard() {
             if (container) container.innerHTML = emptyState(illoSatellite('w-20 h-20'), 'scan failed', 'could not load sessions');
             allSessions = [];
         }
+        sessionsLoaded = true;
     }
 
     // ── Activity heatmap ──
@@ -566,8 +568,10 @@ function renderDashboard() {
         wrap.innerHTML = `<svg viewBox="0 0 ${width} ${height}" style="width:100%;min-width:${width}px;height:auto;display:block" role="img" aria-label="Session activity for ${today.getFullYear()}">${labels}${rects}</svg>`;
         wrap.scrollLeft = wrap.scrollWidth;
 
+        // No count until sessions have actually loaded - a "0 sessions" flash
+        // on the skeleton render reads as broken.
         const totalEl = document.getElementById('heatmap-total');
-        if (totalEl) totalEl.textContent = total.toLocaleString() + ' sessions in ' + today.getFullYear();
+        if (totalEl) totalEl.textContent = sessionsLoaded ? total.toLocaleString() + ' sessions in ' + today.getFullYear() : '';
 
         const svg = wrap.querySelector('svg');
         wireHeatmapTooltip(svg);
@@ -981,6 +985,10 @@ function renderDashboard() {
     // ── Initial load ──
     if (initialQuery) searchInput.value = initialQuery;
     updateDeepSearchBtn();
+
+    // Paint the year grid immediately as a skeleton (all-empty cells) so the
+    // heatmap card never sits as a bare legend while sessions load.
+    renderHeatmap();
 
     (async () => {
         await loadSources();
