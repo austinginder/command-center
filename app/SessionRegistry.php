@@ -222,6 +222,9 @@ class SessionRegistry {
 			$sessions = self::listSessions( $project, $source );
 
 			$stale = SearchIndex::getStaleSessions( $sessions );
+			$stale = array_values( array_filter( $stale, function ( $session ) {
+				return ( $session['source'] ?? '' ) !== 'amp' || AmpSessions::canIndexWithoutFetch( $session );
+			} ) );
 			if ( ! empty( $stale ) ) {
 				SearchIndex::indexSessions( $stale );
 			}

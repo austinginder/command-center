@@ -157,8 +157,9 @@ const RESUME_BINS = {
 function resumeCommand(source, project, sessionId) {
     const cfg = RESUME_BINS[source];
     if (!cfg) return null;
-    const cd = project && project !== '-' ? `cd ${project} && ` : '';
-    return cd + `${cfg.bin} ${cfg.flag ? cfg.flag + ' ' : ''}${cfg.resume} ${sessionId}`;
+    const shellQuote = value => `'${String(value).replace(/'/g, `'"'"'`)}'`;
+    const cd = project && project !== '-' ? `cd ${shellQuote(project)} && ` : '';
+    return cd + `${cfg.bin} ${cfg.flag ? cfg.flag + ' ' : ''}${cfg.resume} ${shellQuote(sessionId)}`;
 }
 
 const ICON_COPY = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>';
@@ -394,8 +395,10 @@ function renderDashboard() {
 
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        const start = new Date(today);
-        start.setDate(start.getDate() - 364);
+        // Calendar-year view: Jan 1 through Dec 31, future days blacked out.
+        const jan1 = new Date(today.getFullYear(), 0, 1);
+        const yearEnd = new Date(today.getFullYear(), 11, 31);
+        const start = new Date(jan1);
         start.setDate(start.getDate() - start.getDay()); // snap back to Sunday
 
         // Counts come from the live session list so they match the day headers
@@ -411,7 +414,7 @@ function renderDashboard() {
 
         // Level thresholds: quartiles of the non-zero day counts in range.
         const nonzero = [];
-        for (let d = new Date(start); d <= today; d.setDate(d.getDate() + 1)) {
+        for (let d = new Date(jan1); d <= today; d.setDate(d.getDate() + 1)) {
             const n = counts[dayKey(d)] || 0;
             if (n > 0) nonzero.push(n);
         }
@@ -424,34 +427,34 @@ function renderDashboard() {
         const monthLabels = [];
         let week = 0, lastMonth = -1, total = 0;
 
-        for (let d = new Date(start); d <= today; d.setDate(d.getDate() + 1)) {
+        // One pass over the full padded year: past days are live cells, and
+        // everything else (before Jan 1, after today, trailing partial week)
+        // renders as a blacked-out placeholder. Placeholders are not .hm-cell,
+        // so the tooltip/click handlers skip them. The loop runs to the
+        // Saturday on or after Dec 31 to keep the grid edge square.
+        for (let d = new Date(start); d <= yearEnd || d.getDay() !== 0; d.setDate(d.getDate() + 1)) {
             const wd = d.getDay();
             if (wd === 0 && d > start) week++;
 
-            if (d.getMonth() !== lastMonth) {
+            if (d >= jan1 && d <= yearEnd && d.getMonth() !== lastMonth) {
                 lastMonth = d.getMonth();
                 monthLabels.push({ week, name: MONTHS[lastMonth] });
             }
 
-            const key = dayKey(d);
-            const s = dailyStats[key];
-            const n = counts[key] || 0;
-            total += n;
+            if (d >= jan1 && d <= today) {
+                const key = dayKey(d);
+                const s = dailyStats[key];
+                const n = counts[key] || 0;
+                total += n;
 
-            rects += `<rect class="hm-cell hm-l${level(n)}${key === dayFilter ? ' hm-selected' : ''}" x="${LEFT + week * PITCH}" y="${TOP + wd * PITCH}"
-                width="${CELL}" height="${CELL}" rx="2" data-day="${key}" data-count="${n}"
-                data-tin="${s ? s.tokens_in : 0}" data-tout="${s ? s.tokens_out : 0}"
-                aria-label="${n} session${n !== 1 ? 's' : ''} on ${key}"></rect>`;
-        }
-
-        // Pad the final week with blacked-out future days so the grid edge
-        // stays square. Not .hm-cell, so tooltip/click handlers skip them.
-        const pad = new Date(today);
-        pad.setDate(pad.getDate() + 1);
-        while (pad.getDay() !== 0) {
-            rects += `<rect class="hm-future" x="${LEFT + week * PITCH}" y="${TOP + pad.getDay() * PITCH}"
-                width="${CELL}" height="${CELL}" rx="2" aria-hidden="true"></rect>`;
-            pad.setDate(pad.getDate() + 1);
+                rects += `<rect class="hm-cell hm-l${level(n)}${key === dayFilter ? ' hm-selected' : ''}" x="${LEFT + week * PITCH}" y="${TOP + wd * PITCH}"
+                    width="${CELL}" height="${CELL}" rx="2" data-day="${key}" data-count="${n}"
+                    data-tin="${s ? s.tokens_in : 0}" data-tout="${s ? s.tokens_out : 0}"
+                    aria-label="${n} session${n !== 1 ? 's' : ''} on ${key}"></rect>`;
+            } else {
+                rects += `<rect class="hm-future" x="${LEFT + week * PITCH}" y="${TOP + wd * PITCH}"
+                    width="${CELL}" height="${CELL}" rx="2" aria-hidden="true"></rect>`;
+            }
         }
 
         // Drop the first month label when the next one crowds it out.
@@ -464,11 +467,11 @@ function renderDashboard() {
 
         const width = LEFT + (week + 1) * PITCH;
         const height = TOP + 7 * PITCH;
-        wrap.innerHTML = `<svg width="${width}" height="${height}" role="img" aria-label="Session activity over the past year">${labels}${rects}</svg>`;
+        wrap.innerHTML = `<svg width="${width}" height="${height}" role="img" aria-label="Session activity for ${today.getFullYear()}">${labels}${rects}</svg>`;
         wrap.scrollLeft = wrap.scrollWidth;
 
         const totalEl = document.getElementById('heatmap-total');
-        if (totalEl) totalEl.textContent = total.toLocaleString() + ' sessions in the last year';
+        if (totalEl) totalEl.textContent = total.toLocaleString() + ' sessions in ' + today.getFullYear();
 
         const svg = wrap.querySelector('svg');
         wireHeatmapTooltip(svg);

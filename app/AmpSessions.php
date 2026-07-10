@@ -37,18 +37,18 @@ class AmpSessions {
 			return null;
 		}
 		$local = self::threadsDir() . '/' . $id . '.json';
-		if ( is_file( $local ) ) {
-			return $local;
-		}
 		$cached = self::cacheDir() . '/' . $id . '.json';
-		return is_file( $cached ) ? $cached : null;
+		$files  = array_values( array_filter( [ $cached, $local ], 'is_file' ) );
+		usort( $files, fn( $a, $b ) => (int) @filemtime( $b ) <=> (int) @filemtime( $a ) );
+		return $files[0] ?? null;
 	}
 
 	public static function fingerprint( array $session ): ?array {
 		if ( isset( $session['remote_updated'] ) ) {
+			$file = self::findSessionFile( $session['id'] ?? '' );
 			return [
-				'mtime' => (int) floor( (int) $session['remote_updated'] / 1000 ),
-				'size'  => (int) ( $session['message_count'] ?? 0 ),
+				'mtime' => max( (int) $session['remote_updated'], (int) ( $file ? @filemtime( $file ) * 1000 : 0 ) ),
+				'size'  => max( (int) ( $session['message_count'] ?? 0 ), (int) ( $file ? @filesize( $file ) : 0 ) ),
 			];
 		}
 		$file = self::findSessionFile( $session['id'] ?? '' );
@@ -66,9 +66,9 @@ class AmpSessions {
 	 * Index user and assistant prose, excluding thinking and tool output.
 	 */
 	public static function extractSessionText( array $session ): string {
-		$thread = self::loadThread( $session['id'] ?? '', (int) ( $session['remote_updated'] ?? 0 ) );
+		$thread = self::loadThread( $session['id'] ?? '', (int) ( $session['remote_updated'] ?? 0 ), true );
 		if ( ! $thread ) {
-			return $session['display'] ?? '';
+			return '';
 		}
 
 		$parts = [];
@@ -95,7 +95,7 @@ class AmpSessions {
 	 * Amp records usage on each assistant inference message.
 	 */
 	public static function extractUsage( array $session ): ?array {
-		$thread = self::loadThread( $session['id'] ?? '', (int) ( $session['remote_updated'] ?? 0 ) );
+		$thread = self::loadThread( $session['id'] ?? '', (int) ( $session['remote_updated'] ?? 0 ), true );
 		if ( ! $thread ) {
 			return null;
 		}
@@ -300,6 +300,23 @@ class AmpSessions {
 	}
 
 	/**
+	 * Automatic search refreshes must not hydrate remote-only threads while the
+	 * SQLite index holds its write transaction. Explicit reindex may fetch them.
+	 */
+	public static function canIndexWithoutFetch( array $session ): bool {
+		$file = self::findSessionFile( $session['id'] ?? '' );
+		if ( ! $file ) {
+			return false;
+		}
+		$remoteUpdated = (int) ( $session['remote_updated'] ?? 0 );
+		if ( $remoteUpdated > 0 && (int) @filemtime( $file ) < (int) floor( $remoteUpdated / 1000 ) ) {
+			return false;
+		}
+		$thread = self::readJson( $file );
+		return is_array( $thread ) && ! self::isProvisional( $thread );
+	}
+
+	/**
 	 * Amp rewrites a complete JSON snapshot rather than appending JSONL, so replay
 	 * the latest valid snapshot and close instead of tailing a file mid-write.
 	 */
@@ -373,22 +390,31 @@ class AmpSessions {
 		return is_array( $data ) ? $data : null;
 	}
 
-	private static function loadThread( string $id, int $remoteUpdated = 0 ): ?array {
+	private static function loadThread( string $id, int $remoteUpdated = 0, bool $requireFresh = false ): ?array {
 		if ( ! self::isValidSessionId( $id ) ) {
 			return null;
 		}
 
 		$local  = self::threadsDir() . '/' . $id . '.json';
 		$cached = self::cacheDir() . '/' . $id . '.json';
-		$file   = is_file( $local ) ? $local : ( is_file( $cached ) ? $cached : null );
+		$files  = array_values( array_filter( [ $cached, $local ], 'is_file' ) );
+		usort( $files, fn( $a, $b ) => (int) @filemtime( $b ) <=> (int) @filemtime( $a ) );
+		$file = $files[0] ?? null;
+
 		if ( $file && ( $remoteUpdated === 0 || (int) @filemtime( $file ) >= (int) floor( $remoteUpdated / 1000 ) ) ) {
-			return self::readJson( $file );
+			$thread = self::readJson( $file );
+			if ( $thread && ! self::isProvisional( $thread ) ) {
+				return $thread;
+			}
+			if ( $thread && ! $requireFresh && time() - (int) @filemtime( $file ) < 30 ) {
+				return $thread;
+			}
 		}
 
 		$exported = self::runAmp( [ 'threads', 'export', $id ] );
 		$thread   = $exported !== null ? json_decode( $exported, true ) : null;
 		if ( ! is_array( $thread ) ) {
-			return $file ? self::readJson( $file ) : null;
+			return $requireFresh ? null : ( $file ? self::readJson( $file ) : null );
 		}
 
 		$dir = self::cacheDir();
@@ -398,7 +424,12 @@ class AmpSessions {
 				@touch( $cached, (int) floor( $remoteUpdated / 1000 ) );
 			}
 		}
-		return $thread;
+		return $requireFresh && self::isProvisional( $thread ) ? null : $thread;
+	}
+
+	private static function isProvisional( array $thread ): bool {
+		$state = strtolower( (string) ( $thread['meta']['lastKnownAgentState']['state'] ?? '' ) );
+		return in_array( $state, [ 'streaming', 'running', 'working' ], true );
 	}
 
 	private static function remoteThreads(): array {
@@ -448,9 +479,42 @@ class AmpSessions {
 		$override = getenv( 'AMP_BIN' );
 		$home     = getenv( 'HOME' ) ?: ( $_SERVER['HOME'] ?? '' );
 		$binary   = $override ?: ( is_executable( $home . '/.local/bin/amp' ) ? $home . '/.local/bin/amp' : 'amp' );
-		$command  = implode( ' ', array_map( 'escapeshellarg', array_merge( [ $binary ], $args ) ) ) . ' 2>/dev/null';
-		$output   = @shell_exec( $command );
-		return is_string( $output ) && trim( $output ) !== '' ? $output : null;
+		$pipes    = [];
+		$process  = @proc_open(
+			array_merge( [ $binary ], $args ),
+			[ 0 => [ 'pipe', 'r' ], 1 => [ 'pipe', 'w' ], 2 => [ 'pipe', 'w' ] ],
+			$pipes,
+			null,
+			null,
+			[ 'bypass_shell' => true ]
+		);
+		if ( ! is_resource( $process ) ) {
+			return null;
+		}
+
+		fclose( $pipes[0] );
+		stream_set_blocking( $pipes[1], false );
+		stream_set_blocking( $pipes[2], false );
+		$output   = '';
+		$deadline = microtime( true ) + 20;
+		do {
+			$output .= stream_get_contents( $pipes[1] );
+			stream_get_contents( $pipes[2] );
+			$status = proc_get_status( $process );
+			if ( ! $status['running'] ) {
+				break;
+			}
+			usleep( 50000 );
+		} while ( microtime( true ) < $deadline );
+
+		if ( $status['running'] ?? false ) {
+			proc_terminate( $process );
+		}
+		$output .= stream_get_contents( $pipes[1] );
+		fclose( $pipes[1] );
+		fclose( $pipes[2] );
+		proc_close( $process );
+		return trim( $output ) !== '' ? $output : null;
 	}
 
 	private static function projectPath( array $thread ): string {
