@@ -323,6 +323,10 @@ class SearchIndex {
 	/**
 	 * Per-day session counts + token totals for the activity heatmap.
 	 * Days are local-time; token sums treat NULL (not yet backfilled) as 0.
+	 *
+	 * tokens_in is FRESH input only (new + cache-creation tokens). Cache reads
+	 * re-count the whole context on every API turn, so they dwarf everything
+	 * else and are reported separately as tokens_cache.
 	 */
 	public static function statsDaily( ?string $project = null, ?string $source = null ): array {
 		$db = self::db();
@@ -330,8 +334,9 @@ class SearchIndex {
 		$sql = "
 			SELECT date(timestamp_ms / 1000, 'unixepoch', 'localtime') AS day,
 			       COUNT(*) AS sessions,
-			       SUM(COALESCE(tokens_input, 0) + COALESCE(tokens_cache_read, 0) + COALESCE(tokens_cache_creation, 0)) AS tokens_in,
-			       SUM(COALESCE(tokens_output, 0)) AS tokens_out
+			       SUM(COALESCE(tokens_input, 0) + COALESCE(tokens_cache_creation, 0)) AS tokens_in,
+			       SUM(COALESCE(tokens_output, 0)) AS tokens_out,
+			       SUM(COALESCE(tokens_cache_read, 0)) AS tokens_cache
 			FROM session_files
 			WHERE timestamp_ms > 0
 		";
@@ -355,10 +360,11 @@ class SearchIndex {
 		$rows   = [];
 		while ( $row = $result->fetchArray( SQLITE3_ASSOC ) ) {
 			$rows[] = [
-				'day'        => $row['day'],
-				'sessions'   => (int) $row['sessions'],
-				'tokens_in'  => (int) $row['tokens_in'],
-				'tokens_out' => (int) $row['tokens_out'],
+				'day'          => $row['day'],
+				'sessions'     => (int) $row['sessions'],
+				'tokens_in'    => (int) $row['tokens_in'],
+				'tokens_out'   => (int) $row['tokens_out'],
+				'tokens_cache' => (int) $row['tokens_cache'],
 			];
 		}
 		return $rows;

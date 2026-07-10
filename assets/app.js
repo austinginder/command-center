@@ -99,6 +99,18 @@ function dayLabel(ts) {
     return d.toLocaleDateString([], opts);
 }
 
+function localDayKey(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function dayKeyLabel(key) {
+    const [y, m, dd] = key.split('-').map(Number);
+    const d = new Date(y, m - 1, dd);
+    const opts = { weekday: 'short', month: 'short', day: 'numeric' };
+    if (y !== new Date().getFullYear()) opts.year = 'numeric';
+    return d.toLocaleDateString([], opts);
+}
+
 function usageSummary(usage) {
     if (!usage) return '';
     return formatTokens(usage.input) + ' in / ' + formatTokens(usage.output) + ' out';
@@ -290,7 +302,8 @@ function renderDashboard() {
     let deepResults = null;    // array | null
     let activeSource = '';
     let shown = PAGE_SIZE;
-    let dailyStats = {};       // 'YYYY-MM-DD' -> {sessions, tokens_in, tokens_out}
+    let dailyStats = {};       // 'YYYY-MM-DD' -> {sessions, tokens_in, tokens_out, tokens_cache}
+    let dayFilter = '';        // 'YYYY-MM-DD' - set by clicking a heatmap cell
 
     const searchInput = document.getElementById('session-search');
     const projectSelect = document.getElementById('session-project-filter');
@@ -301,6 +314,7 @@ function renderDashboard() {
     const initialDeep = urlParams.get('deep') === '1';
     const initialProject = urlParams.get('project') || '';
     activeSource = urlParams.get('source') || '';
+    dayFilter = urlParams.get('day') || '';
 
     function updateURL() {
         const params = new URLSearchParams();
@@ -309,6 +323,7 @@ function renderDashboard() {
         if (deepResults) params.set('deep', '1');
         if (projectSelect.value) params.set('project', projectSelect.value);
         if (activeSource) params.set('source', activeSource);
+        if (dayFilter) params.set('day', dayFilter);
         const qs = params.toString();
         history.replaceState(null, '', '/' + (qs ? '?' + qs : ''));
     }
@@ -372,7 +387,7 @@ function renderDashboard() {
 
         const CELL = 11, PITCH = 14, TOP = 16, LEFT = 28;
         const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        const dayKey = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        const dayKey = localDayKey;
 
         const today = new Date();
         today.setHours(0, 0, 0, 0);
@@ -420,7 +435,7 @@ function renderDashboard() {
             const n = counts[key] || 0;
             total += n;
 
-            rects += `<rect class="hm-cell hm-l${level(n)}" x="${LEFT + week * PITCH}" y="${TOP + wd * PITCH}"
+            rects += `<rect class="hm-cell hm-l${level(n)}${key === dayFilter ? ' hm-selected' : ''}" x="${LEFT + week * PITCH}" y="${TOP + wd * PITCH}"
                 width="${CELL}" height="${CELL}" rx="2" data-day="${key}" data-count="${n}"
                 data-tin="${s ? s.tokens_in : 0}" data-tout="${s ? s.tokens_out : 0}"
                 aria-label="${n} session${n !== 1 ? 's' : ''} on ${key}"></rect>`;
@@ -442,7 +457,21 @@ function renderDashboard() {
         const totalEl = document.getElementById('heatmap-total');
         if (totalEl) totalEl.textContent = total.toLocaleString() + ' sessions in the last year';
 
-        wireHeatmapTooltip(wrap.querySelector('svg'));
+        const svg = wrap.querySelector('svg');
+        wireHeatmapTooltip(svg);
+
+        // Click a day to filter the session list to it; click again to clear.
+        svg.addEventListener('click', e => {
+            const cell = e.target.closest('.hm-cell');
+            if (!cell) return;
+            dayFilter = dayFilter === cell.dataset.day ? '' : cell.dataset.day;
+            deepResults = null;
+            shown = PAGE_SIZE;
+            updateDeepSearchBtn();
+            updateURL();
+            renderHeatmap();
+            renderList();
+        });
     }
 
     function wireHeatmapTooltip(svg) {
@@ -467,10 +496,6 @@ function renderDashboard() {
             const n = parseInt(cell.dataset.count, 10);
             const tin = parseInt(cell.dataset.tin, 10);
             const tout = parseInt(cell.dataset.tout, 10);
-            const [y, m, dd] = cell.dataset.day.split('-').map(Number);
-            const d = new Date(y, m - 1, dd);
-            const opts = { weekday: 'short', month: 'short', day: 'numeric' };
-            if (y !== new Date().getFullYear()) opts.year = 'numeric';
 
             tip.textContent = '';
             const value = document.createElement('div');
@@ -480,7 +505,7 @@ function renderDashboard() {
 
             const date = document.createElement('div');
             date.className = 'hm-tip-sub';
-            date.textContent = d.toLocaleDateString([], opts);
+            date.textContent = dayKeyLabel(cell.dataset.day);
             tip.appendChild(date);
 
             if (tin + tout > 0) {
@@ -548,6 +573,7 @@ function renderDashboard() {
     function visibleSessions() {
         let list = allSessions;
         if (activeSource) list = list.filter(s => s.source === activeSource);
+        if (dayFilter) list = list.filter(s => s.timestamp_s && localDayKey(new Date(s.timestamp_s * 1000)) === dayFilter);
         const q = searchInput.value.trim().toLowerCase();
         if (q) {
             list = list.filter(s =>
@@ -593,8 +619,18 @@ function renderDashboard() {
         if (deepResults) { renderDeepResults(container); return; }
 
         const list = visibleSessions();
+
+        let dayBanner = '';
+        if (dayFilter) {
+            dayBanner = `<div class="px-4 py-2 bg-emerald-500/10 text-xs font-mono text-emerald-600 dark:text-emerald-500 flex items-center justify-between">
+                <span>${list.length} session${list.length !== 1 ? 's' : ''} on ${esc(dayKeyLabel(dayFilter))}</span>
+                <button id="clear-day-filter" class="font-medium hover:underline">clear</button>
+            </div>`;
+        }
+
         if (list.length === 0) {
-            container.innerHTML = emptyState(illoRadar(), 'no signals detected', 'no sessions match the current filters');
+            container.innerHTML = dayBanner + emptyState(illoRadar(), 'no signals detected', 'no sessions match the current filters');
+            wireClearDayFilter(container);
             return;
         }
 
@@ -607,7 +643,7 @@ function renderDashboard() {
             dayCounts[key] = (dayCounts[key] || 0) + 1;
         });
 
-        let html = '';
+        let html = dayBanner;
         let lastDay = null;
         slice.forEach(s => {
             const key = s.timestamp_s ? new Date(s.timestamp_s * 1000).toDateString() : 'undated';
@@ -626,8 +662,19 @@ function renderDashboard() {
 
         container.innerHTML = html;
         wireRows(container);
+        wireClearDayFilter(container);
         document.getElementById('show-more')?.addEventListener('click', () => {
             shown += PAGE_SIZE;
+            renderList();
+        });
+    }
+
+    function wireClearDayFilter(container) {
+        container.querySelector('#clear-day-filter')?.addEventListener('click', () => {
+            dayFilter = '';
+            shown = PAGE_SIZE;
+            updateURL();
+            renderHeatmap();
             renderList();
         });
     }

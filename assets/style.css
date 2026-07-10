@@ -120,8 +120,11 @@ details.tool-group[open] > summary .tool-group-label::before { content: '▾ '; 
 .dark .hm-l2 { fill: #047857; }
 .dark .hm-l3 { fill: #10b981; }
 .dark .hm-l4 { fill: #6ee7b7; }
+.hm-cell { cursor: pointer; }
 .hm-cell:hover { stroke: rgba(24, 24, 27, 0.5); stroke-width: 1; }
 .dark .hm-cell:hover { stroke: rgba(244, 244, 245, 0.6); }
+.hm-selected, .hm-selected:hover { stroke: #18181b; stroke-width: 1.5; }
+.dark .hm-selected, .dark .hm-selected:hover { stroke: #f4f4f5; }
 .hm-label { fill: #a1a1aa; font-size: 9px; font-family: 'JetBrains Mono', monospace; }
 .dark .hm-label { fill: #71717a; }
 
