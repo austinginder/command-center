@@ -1,0 +1,150 @@
+/* ─── Base ──────────────────────────────────────────────────── */
+* { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+
+/* Global scale — rem-based Tailwind sizes (text + spacing) all key off this. */
+html { font-size: 115%; }
+
+/* Smooth transitions on interactive elements */
+button, a, input, select { transition: all 0.15s ease; }
+
+/* Control-room dot grid backdrop */
+body {
+    background-image: radial-gradient(circle, rgba(24, 24, 27, 0.05) 1px, transparent 1px);
+    background-size: 22px 22px;
+}
+.dark body {
+    background-image: radial-gradient(circle, rgba(244, 244, 245, 0.045) 1px, transparent 1px);
+}
+
+/* ─── Radar (logo + illustrations) ─────────────────────────── */
+.radar-sweep {
+    transform-box: view-box;
+    transform-origin: 50% 50%;
+    animation: radar-spin 5s linear infinite;
+}
+@keyframes radar-spin {
+    to { transform: rotate(360deg); }
+}
+.radar-blip {
+    opacity: 0;
+    animation: radar-blip 5s ease-out infinite;
+}
+@keyframes radar-blip {
+    0% { opacity: 0; }
+    8% { opacity: 1; }
+    55% { opacity: 0.15; }
+    100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .radar-sweep, .radar-blip { animation: none; }
+    .radar-blip { opacity: 0.5; }
+}
+
+/* ─── Message Markdown (.md-body) ──────────────────────────── */
+.md-body p { margin: 0.25rem 0; }
+.md-body p:first-child { margin-top: 0; }
+.md-body p:last-child { margin-bottom: 0; }
+.md-body h1, .md-body h2, .md-body h3, .md-body h4 {
+    font-weight: 600;
+    margin: 0.75rem 0 0.25rem;
+}
+.md-body h1 { font-size: 1.15em; }
+.md-body h2 { font-size: 1.1em; }
+.md-body h3, .md-body h4 { font-size: 1.05em; }
+.md-body ol, .md-body ul { margin: 0.25rem 0; padding-left: 1.25rem; }
+.md-body ol { list-style: decimal; }
+.md-body ul { list-style: disc; }
+.md-body li { margin: 0.125rem 0; }
+.md-body code {
+    background: #f4f4f5;
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    font-size: 0.9em;
+    font-family: 'JetBrains Mono', monospace;
+}
+.dark .md-body code { background: #27272a; color: #e4e4e7; }
+.md-body pre {
+    background: #18181b;
+    color: #e4e4e7;
+    padding: 0.75rem 0.875rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 0.5rem 0;
+    border: 1px solid #27272a;
+    font-size: 0.85em;
+    line-height: 1.6;
+}
+.md-body pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+.md-body blockquote { border-left: 2px solid #d4d4d8; padding-left: 0.875rem; color: #71717a; margin: 0.5rem 0; }
+.dark .md-body blockquote { border-color: #3f3f46; }
+.md-body a { color: #3b82f6; text-decoration: none; }
+.md-body a:hover { text-decoration: underline; }
+.dark .md-body a { color: #60a5fa; }
+.md-body strong { font-weight: 600; }
+.md-body hr { border-top: 1px solid #e4e4e7; margin: 0.75rem 0; }
+.dark .md-body hr { border-color: #27272a; }
+.md-body table { border-collapse: collapse; margin: 0.5rem 0; font-size: 0.9em; display: block; overflow-x: auto; }
+.md-body th, .md-body td { border: 1px solid #e4e4e7; padding: 0.25rem 0.6rem; text-align: left; }
+.dark .md-body th, .dark .md-body td { border-color: #3f3f46; }
+.md-body img { max-width: 100%; border-radius: 6px; }
+
+/* ─── Deep Search Highlights ───────────────────────────────── */
+#sessions-list mark { background: #fef08a; padding: 0.05rem 0.15rem; border-radius: 2px; }
+.dark #sessions-list mark { background: #854d0e; color: #fef9c3; }
+.line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* ─── Tool Groups ──────────────────────────────────────────── */
+details.tool-group > summary { list-style: none; }
+details.tool-group > summary::-webkit-details-marker { display: none; }
+details.tool-group > summary .tool-group-label::before { content: '▸ '; }
+details.tool-group[open] > summary .tool-group-label::before { content: '▾ '; }
+
+/* ─── Custom Scrollbars ────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #a1a1aa; }
+.dark ::-webkit-scrollbar-thumb { background: #3f3f46; }
+.dark ::-webkit-scrollbar-thumb:hover { background: #52525b; }
+
+/* ─── Activity Heatmap ─────────────────────────────────────── */
+/* Sequential emerald ramp — monotone lightness per mode (dark gets its own
+   steps anchored bright-on-dark, not a flipped light ramp). */
+.hm-l0 { fill: #f4f4f5; }
+.hm-l1 { fill: #a7f3d0; }
+.hm-l2 { fill: #34d399; }
+.hm-l3 { fill: #059669; }
+.hm-l4 { fill: #065f46; }
+.dark .hm-l0 { fill: #27272a; }
+.dark .hm-l1 { fill: #064e3b; }
+.dark .hm-l2 { fill: #047857; }
+.dark .hm-l3 { fill: #10b981; }
+.dark .hm-l4 { fill: #6ee7b7; }
+.hm-cell:hover { stroke: rgba(24, 24, 27, 0.5); stroke-width: 1; }
+.dark .hm-cell:hover { stroke: rgba(244, 244, 245, 0.6); }
+.hm-label { fill: #a1a1aa; font-size: 9px; font-family: 'JetBrains Mono', monospace; }
+.dark .hm-label { fill: #71717a; }
+
+#heatmap-tooltip {
+    position: fixed;
+    z-index: 50;
+    pointer-events: none;
+    background: #18181b;
+    color: #f4f4f5;
+    border: 1px solid #3f3f46;
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    line-height: 1.5;
+    white-space: nowrap;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+#heatmap-tooltip .hm-tip-value { font-weight: 600; }
+#heatmap-tooltip .hm-tip-sub { color: #a1a1aa; }
+
+/* ─── Focus Rings ──────────────────────────────────────────── */
+input:focus, select:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25);
+}

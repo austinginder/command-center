@@ -1,0 +1,12 @@
+# Local data — the search index and agent artifacts contain your full
+# conversation content. Never commit this directory.
+data/*
+!data/.gitkeep
+
+# Tool-generated local state
+.commandcode/
+.antigravitycli/
+.claude/
+
+# OS noise
+.DS_Store
