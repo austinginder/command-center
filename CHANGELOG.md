@@ -2,6 +2,13 @@
 
 All notable changes to Command Center are documented here.
 
+## [1.1.0] - 2026-07-10
+
+### Changed
+
+- **Dark mode redesigned** to match the commandcenter.run landing page: deep green-black terminal palette, dot-grid backdrop, brighter heatmap ramp, and JetBrains Mono chrome. Light mode is unchanged.
+- Body typeface switched from Inter to the system sans stack (SF Pro on macOS).
+
 ## [1.0.0] - 2026-07-10
 
 Initial public release.

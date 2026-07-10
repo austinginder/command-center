@@ -29,7 +29,7 @@ function navigate(path, push = true) {
     }
 
     app.innerHTML = `
-        <div class="max-w-md mx-auto mt-10 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
+        <div class="max-w-md mx-auto mt-10 bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm">
             ${emptyState(illoSatellite(), 'signal lost', 'no route matches ' + esc(pathname))}
             <div class="pb-10 -mt-8 text-center">
                 <a href="/" data-route class="text-xs font-mono text-emerald-600 dark:text-emerald-500 hover:underline">↩ return to base</a>
@@ -173,7 +173,7 @@ function copyWithFlash(btn, text, iconSel) {
 // ─── Illustrations ───────────────────────────────────────────
 // Radar scope - sweep + blips (blip delays synced to the 5s sweep).
 function illoRadar(cls = 'w-24 h-24') {
-    return `<svg class="${cls} mx-auto text-zinc-300 dark:text-zinc-700" viewBox="0 0 96 96" fill="none" aria-hidden="true">
+    return `<svg class="${cls} mx-auto text-zinc-300 dark:text-cc-line3" viewBox="0 0 96 96" fill="none" aria-hidden="true">
         <circle cx="48" cy="48" r="44" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 4"/>
         <circle cx="48" cy="48" r="32" stroke="currentColor" stroke-width="1"/>
         <circle cx="48" cy="48" r="19" stroke="currentColor" stroke-width="1" opacity="0.7"/>
@@ -192,7 +192,7 @@ function illoRadar(cls = 'w-24 h-24') {
 
 // Drifting satellite with a dropped signal - for 404 / not-found.
 function illoSatellite(cls = 'w-28 h-28') {
-    return `<svg class="${cls} mx-auto text-zinc-300 dark:text-zinc-700" viewBox="0 0 96 96" fill="none" aria-hidden="true">
+    return `<svg class="${cls} mx-auto text-zinc-300 dark:text-cc-line3" viewBox="0 0 96 96" fill="none" aria-hidden="true">
         <circle cx="14" cy="20" r="1" fill="currentColor" opacity="0.6"/>
         <circle cx="82" cy="14" r="1.2" fill="currentColor" opacity="0.5"/>
         <circle cx="88" cy="58" r="1" fill="currentColor" opacity="0.6"/>
@@ -221,8 +221,8 @@ function illoSatellite(cls = 'w-28 h-28') {
 function emptyState(illo, title, sub) {
     return `<div class="py-14 px-6 text-center">
         ${illo}
-        <div class="mt-5 text-xs font-mono font-semibold uppercase tracking-[0.2em] text-zinc-400 dark:text-zinc-500">${title}</div>
-        ${sub ? `<div class="mt-1.5 text-xs font-mono text-zinc-400/80 dark:text-zinc-600">${sub}</div>` : ''}
+        <div class="mt-5 text-xs font-mono font-semibold uppercase tracking-[0.2em] text-zinc-400 dark:text-cc-dim">${title}</div>
+        ${sub ? `<div class="mt-1.5 text-xs font-mono text-zinc-400/80 dark:text-cc-dim">${sub}</div>` : ''}
     </div>`;
 }
 
@@ -250,9 +250,9 @@ function renderDashboard() {
                 <svg class="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                 <input type="text" id="session-search" autocomplete="off" spellcheck="false"
                     placeholder="Search sessions - Enter searches full conversation content"
-                    class="w-full h-11 pl-10 pr-28 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-sm shadow-sm placeholder:text-zinc-400 dark:placeholder:text-zinc-600 text-zinc-900 dark:text-zinc-100">
+                    class="w-full h-11 pl-10 pr-28 rounded-xl border border-zinc-200 dark:border-cc-line bg-white dark:bg-cc-card text-sm shadow-sm placeholder:text-zinc-400 dark:placeholder:text-cc-dim text-zinc-900 dark:text-cc-bright">
                 <button id="deep-search-btn" disabled
-                    class="absolute right-2 top-1/2 -translate-y-1/2 px-2.5 py-1 text-xs font-medium rounded-lg bg-zinc-900 text-zinc-100 dark:bg-zinc-100 dark:text-zinc-900 disabled:opacity-25 disabled:cursor-not-allowed transition-opacity">
+                    class="absolute right-2 top-1/2 -translate-y-1/2 px-2.5 py-1 text-xs font-medium rounded-lg bg-zinc-900 text-zinc-100 dark:bg-cc-ink dark:text-cc-bg disabled:opacity-25 disabled:cursor-not-allowed transition-opacity">
                     Deep search
                 </button>
             </div>
@@ -261,21 +261,21 @@ function renderDashboard() {
             <div class="flex flex-wrap items-center gap-2">
                 <div id="source-pills" class="flex flex-wrap items-center gap-1.5"></div>
                 <div class="ml-auto flex items-center gap-2">
-                    <select id="session-project-filter" class="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 px-2 py-1.5 text-xs max-w-[220px]">
+                    <select id="session-project-filter" class="rounded-lg border border-zinc-200 dark:border-cc-line bg-white dark:bg-cc-card text-zinc-700 dark:text-cc-soft px-2 py-1.5 text-xs max-w-[220px]">
                         <option value="">All projects</option>
                     </select>
-                    <button id="reindex-btn" title="Rebuild search index" class="p-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">
+                    <button id="reindex-btn" title="Rebuild search index" class="p-1.5 rounded-lg border border-zinc-200 dark:border-cc-line bg-white dark:bg-cc-card text-zinc-400 hover:text-zinc-600 dark:hover:text-cc-soft transition-colors">
                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                     </button>
                 </div>
             </div>
 
             <!-- Activity heatmap -->
-            <div class="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm px-4 pt-3 pb-2">
+            <div class="bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm px-4 pt-3 pb-2">
                 <div id="heatmap-wrap" class="overflow-x-auto"></div>
                 <div class="flex items-center justify-between gap-3 mt-1.5 px-0.5">
-                    <span id="heatmap-total" class="text-[11px] font-mono text-zinc-400 dark:text-zinc-500"></span>
-                    <span class="flex items-center gap-1.5 text-[11px] font-mono text-zinc-400 dark:text-zinc-500 shrink-0">
+                    <span id="heatmap-total" class="text-[11px] font-mono text-zinc-400 dark:text-cc-dim"></span>
+                    <span class="flex items-center gap-1.5 text-[11px] font-mono text-zinc-400 dark:text-cc-dim shrink-0">
                         Less
                         <svg width="73" height="11" aria-hidden="true">
                             <rect class="hm-l0" x="0"  width="11" height="11" rx="2"></rect>
@@ -290,7 +290,7 @@ function renderDashboard() {
             </div>
 
             <!-- Sessions -->
-            <div id="sessions-list" class="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
+            <div id="sessions-list" class="bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm overflow-hidden">
                 ${emptyState(illoRadar('w-16 h-16'), 'scanning', 'loading session archives')}
             </div>
         </div>
@@ -540,11 +540,11 @@ function renderDashboard() {
         const pill = (id, label, count) => {
             const active = activeSource === id;
             const base = active
-                ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
-                : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:border-zinc-400 dark:hover:border-zinc-600';
+                ? 'border-zinc-900 dark:border-cc-ink bg-zinc-900 text-white dark:bg-cc-ink dark:text-cc-bg'
+                : 'border-zinc-200 dark:border-cc-line bg-white dark:bg-cc-card text-zinc-600 dark:text-cc-mut hover:border-zinc-400 dark:hover:border-[#2a3830]';
             const dot = id ? `<span class="w-1.5 h-1.5 rounded-full ${SOURCE_DOTS[id] || 'bg-zinc-400'}"></span>` : '';
             return `<button data-source="${esc(id)}" class="source-pill inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition-colors ${base}">
-                ${dot}<span>${esc(label)}</span><span class="font-mono text-[11px] ${active ? 'opacity-60' : 'text-zinc-400 dark:text-zinc-500'}">${count}</span>
+                ${dot}<span>${esc(label)}</span><span class="font-mono text-[11px] ${active ? 'opacity-60' : 'text-zinc-400 dark:text-cc-dim'}">${count}</span>
             </button>`;
         };
 
@@ -586,7 +586,7 @@ function renderDashboard() {
 
     function copyBtnHtml(source, project, id) {
         if (!RESUME_BINS[source]) return '<span class="w-[26px] shrink-0"></span>';
-        return `<button class="copy-resume-btn shrink-0 p-1 rounded text-zinc-300 dark:text-zinc-600 opacity-0 group-hover:opacity-100 hover:!text-blue-500 transition-all"
+        return `<button class="copy-resume-btn shrink-0 p-1 rounded text-zinc-300 dark:text-cc-dim opacity-0 group-hover:opacity-100 hover:!text-blue-500 transition-all"
             data-project="${esc(project || '')}" data-sid="${esc(id)}" data-source="${esc(source)}" title="Copy CLI resume command">${ICON_COPY}</button>`;
     }
 
@@ -594,21 +594,21 @@ function renderDashboard() {
         const title = s.display || s.id;
         const src = s.source || 'claude';
         return `
-        <div class="session-row group flex items-center gap-3 px-4 py-2 cursor-pointer border-t border-zinc-100 dark:border-zinc-800/60 hover:bg-zinc-50 dark:hover:bg-zinc-800/40"
+        <div class="session-row group flex items-center gap-3 px-4 py-2 cursor-pointer border-t border-zinc-100 dark:border-cc-line2 hover:bg-zinc-50 dark:hover:bg-cc-panel"
              data-session-id="${esc(s.id)}" data-source="${esc(src)}">
             ${sourceBadge(src, s.sourceLabel)}
-            <span class="flex-1 min-w-0 truncate text-sm text-zinc-800 dark:text-zinc-200" title="${esc(title)}">${esc(title)}</span>
-            <span class="hidden md:block max-w-[180px] truncate text-xs font-mono text-zinc-400 dark:text-zinc-500">${esc(s.projectName || '')}</span>
-            <span class="hidden sm:block w-20 text-right text-xs font-mono text-zinc-400 dark:text-zinc-500 shrink-0 whitespace-nowrap">${s.size ? formatBytes(s.size) : ''}</span>
-            <span class="text-right text-xs font-mono text-zinc-400 dark:text-zinc-500 shrink-0 whitespace-nowrap" style="width:4.5rem">${s.timestamp_s ? clockTime(s.timestamp_s) : ''}</span>
+            <span class="flex-1 min-w-0 truncate text-sm text-zinc-800 dark:text-cc-ink" title="${esc(title)}">${esc(title)}</span>
+            <span class="hidden md:block max-w-[180px] truncate text-xs font-mono text-zinc-400 dark:text-cc-dim">${esc(s.projectName || '')}</span>
+            <span class="hidden sm:block w-20 text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap">${s.size ? formatBytes(s.size) : ''}</span>
+            <span class="text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap" style="width:4.5rem">${s.timestamp_s ? clockTime(s.timestamp_s) : ''}</span>
             ${copyBtnHtml(src, s.project, s.id)}
         </div>`;
     }
 
     function dayHeaderHtml(label, count) {
-        return `<div class="flex items-baseline gap-2 px-4 pt-3 pb-1.5 first:pt-2.5 bg-white dark:bg-zinc-900">
-            <span class="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-500">${esc(label)}</span>
-            <span class="text-[11px] font-mono text-zinc-300 dark:text-zinc-600">${count}</span>
+        return `<div class="flex items-baseline gap-2 px-4 pt-3 pb-1.5 first:pt-2.5 bg-white dark:bg-cc-card">
+            <span class="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-cc-dim">${esc(label)}</span>
+            <span class="text-[11px] font-mono text-zinc-300 dark:text-cc-dim">${count}</span>
         </div>`;
     }
 
@@ -655,7 +655,7 @@ function renderDashboard() {
         });
 
         if (list.length > shown) {
-            html += `<button id="show-more" class="w-full py-2.5 border-t border-zinc-100 dark:border-zinc-800/60 text-xs font-mono text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors">
+            html += `<button id="show-more" class="w-full py-2.5 border-t border-zinc-100 dark:border-cc-line2 text-xs font-mono text-zinc-400 hover:text-zinc-600 dark:hover:text-cc-soft hover:bg-zinc-50 dark:hover:bg-cc-panel transition-colors">
                 show more (${list.length - shown} remaining)
             </button>`;
         }
@@ -699,18 +699,18 @@ function renderDashboard() {
         deepResults.forEach(s => {
             const src = s.source || 'claude';
             const typeLabel = s.matchType === 'user' ? 'you' : s.matchType === 'assistant' ? 'assistant' : s.matchType === 'summary' ? 'summary' : '';
-            const typeBadge = typeLabel ? `<span class="inline-block text-[11px] font-mono font-medium px-1 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500 mr-1.5">${typeLabel}</span>` : '';
+            const typeBadge = typeLabel ? `<span class="inline-block text-[11px] font-mono font-medium px-1 py-0.5 rounded bg-zinc-100 dark:bg-cc-panel text-zinc-500 mr-1.5">${typeLabel}</span>` : '';
             html += `
-            <div class="session-row group px-4 py-2.5 cursor-pointer border-t border-zinc-100 dark:border-zinc-800/60 hover:bg-zinc-50 dark:hover:bg-zinc-800/40"
+            <div class="session-row group px-4 py-2.5 cursor-pointer border-t border-zinc-100 dark:border-cc-line2 hover:bg-zinc-50 dark:hover:bg-cc-panel"
                  data-session-id="${esc(s.id)}" data-source="${esc(src)}">
                 <div class="flex items-center gap-2.5 min-w-0">
                     ${sourceBadge(src, s.sourceLabel)}
-                    <span class="flex-1 min-w-0 truncate text-sm font-medium text-zinc-800 dark:text-zinc-200">${esc(s.display || s.id)}</span>
-                    <span class="hidden sm:block max-w-[160px] truncate text-xs font-mono text-zinc-400 dark:text-zinc-500">${esc(s.projectName || '')}</span>
-                    <span class="text-xs font-mono text-zinc-400 dark:text-zinc-500 whitespace-nowrap shrink-0">${s.timestamp_s ? timeAgo(s.timestamp_s) : ''}</span>
+                    <span class="flex-1 min-w-0 truncate text-sm font-medium text-zinc-800 dark:text-cc-ink">${esc(s.display || s.id)}</span>
+                    <span class="hidden sm:block max-w-[160px] truncate text-xs font-mono text-zinc-400 dark:text-cc-dim">${esc(s.projectName || '')}</span>
+                    <span class="text-xs font-mono text-zinc-400 dark:text-cc-dim whitespace-nowrap shrink-0">${s.timestamp_s ? timeAgo(s.timestamp_s) : ''}</span>
                     ${copyBtnHtml(src, s.project, s.id)}
                 </div>
-                <div class="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400 line-clamp-2">${typeBadge}${s.snippet || ''}</div>
+                <div class="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-cc-mut line-clamp-2">${typeBadge}${s.snippet || ''}</div>
             </div>`;
         });
 
@@ -870,22 +870,22 @@ function renderSessionView(sessionId) {
         <div class="max-w-3xl mx-auto space-y-4">
             <div class="flex items-start justify-between gap-4">
                 <div class="flex items-start gap-2.5 min-w-0">
-                    <a href="#" class="session-back-btn mt-0.5 shrink-0 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">
+                    <a href="#" class="session-back-btn mt-0.5 shrink-0 text-zinc-400 hover:text-zinc-600 dark:hover:text-cc-soft">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
                     </a>
                     <div class="min-w-0">
-                        <h1 id="session-title" class="text-sm font-semibold leading-snug text-zinc-900 dark:text-zinc-100 break-words">${esc(sessionId.substring(0, 8))}…</h1>
+                        <h1 id="session-title" class="text-sm font-semibold leading-snug text-zinc-900 dark:text-cc-bright break-words">${esc(sessionId.substring(0, 8))}…</h1>
                         <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
                             <span id="session-source-badge"></span>
-                            <span id="session-meta" class="text-xs font-mono text-zinc-400 dark:text-zinc-500"></span>
+                            <span id="session-meta" class="text-xs font-mono text-zinc-400 dark:text-cc-dim"></span>
                         </div>
                     </div>
                 </div>
-                <button id="session-copy-resume-btn" class="hidden shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:border-zinc-400 dark:hover:border-zinc-500 transition-colors" title="Copy CLI resume command">
+                <button id="session-copy-resume-btn" class="hidden shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-zinc-200 dark:border-cc-line3 bg-white dark:bg-cc-card text-xs font-medium text-zinc-600 dark:text-cc-soft hover:border-zinc-400 dark:hover:border-[#2a3830] transition-colors" title="Copy CLI resume command">
                     <span class="resume-icon">${ICON_COPY}</span> Copy resume
                 </button>
             </div>
-            <div id="session-log" class="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm px-4 sm:px-6 py-5 space-y-1 text-sm"></div>
+            <div id="session-log" class="bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm px-4 sm:px-6 py-5 space-y-1 text-sm"></div>
         </div>
     `;
 
@@ -938,7 +938,7 @@ function renderSessionView(sessionId) {
     es.addEventListener('summary', e => {
         const d = JSON.parse(e.data);
         const div = document.createElement('div');
-        div.className = 'text-zinc-500 italic text-xs py-1 mb-3 border-b border-zinc-100 dark:border-zinc-800';
+        div.className = 'text-zinc-500 italic text-xs py-1 mb-3 border-b border-zinc-100 dark:border-cc-line';
         div.innerHTML = '<strong>Summary:</strong> ' + esc(d.text);
         log.prepend(div);
     });
@@ -963,25 +963,25 @@ function renderSessionView(sessionId) {
 
 // ─── Conversation Rendering ──────────────────────────────────
 const TOOL_STYLES = {
-    shell:  { bg: 'bg-zinc-200 dark:bg-zinc-700', text: 'text-zinc-700 dark:text-zinc-100' },
+    shell:  { bg: 'bg-zinc-200 dark:bg-cc-line3', text: 'text-zinc-700 dark:text-cc-bright' },
     file:   { bg: 'bg-blue-500/15',   text: 'text-blue-500 dark:text-blue-400' },
     search: { bg: 'bg-cyan-500/15',   text: 'text-cyan-600 dark:text-cyan-400' },
     agent:  { bg: 'bg-violet-500/15', text: 'text-violet-500 dark:text-violet-400' },
     web:    { bg: 'bg-amber-500/15',  text: 'text-amber-600 dark:text-amber-400' },
     skill:  { bg: 'bg-pink-500/15',   text: 'text-pink-500 dark:text-pink-400' },
-    misc:   { bg: 'bg-zinc-500/15',   text: 'text-zinc-500 dark:text-zinc-400' },
-    other:  { bg: 'bg-zinc-500/15',   text: 'text-zinc-500 dark:text-zinc-400' },
+    misc:   { bg: 'bg-zinc-500/15',   text: 'text-zinc-500 dark:text-cc-mut' },
+    other:  { bg: 'bg-zinc-500/15',   text: 'text-zinc-500 dark:text-cc-mut' },
 };
 
 function appendEntry(log, type, text) {
     const div = document.createElement('div');
     if (type === 'init') {
-        div.className = 'text-zinc-500 dark:text-zinc-600 text-xs py-0.5 font-mono';
+        div.className = 'text-zinc-500 dark:text-cc-dim text-xs py-0.5 font-mono';
         div.textContent = text;
     } else {
         // Collapse any open tool group before showing assistant text.
         collapseToolGroup(log);
-        div.className = 'md-body border-l-2 border-emerald-500/40 pl-3.5 py-1 my-1.5 text-zinc-800 dark:text-zinc-200 leading-relaxed';
+        div.className = 'md-body border-l-2 border-emerald-500/40 pl-3.5 py-1 my-1.5 text-zinc-800 dark:text-cc-ink leading-relaxed';
         div.innerHTML = marked.parse(text, { breaks: true });
     }
     log.appendChild(div);
@@ -997,7 +997,7 @@ function appendUserMessage(log, text) {
         const div = document.createElement('div');
         div.className = 'mt-4 mb-1 flex items-center gap-1.5';
         div.innerHTML = `
-            <span class="inline-flex items-center shrink-0 px-1.5 py-0.5 rounded text-[11px] font-mono font-semibold uppercase tracking-wider bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300">you</span>
+            <span class="inline-flex items-center shrink-0 px-1.5 py-0.5 rounded text-[11px] font-mono font-semibold uppercase tracking-wider bg-zinc-200 dark:bg-cc-line3 text-zinc-600 dark:text-cc-soft">you</span>
             <code class="text-xs font-mono bg-violet-500/10 text-violet-500 dark:text-violet-400 px-1.5 py-0.5 rounded">${esc(cmdMatch[1])} ${esc(cmdMatch[2].trim())}</code>
         `;
         log.appendChild(div);
@@ -1005,10 +1005,10 @@ function appendUserMessage(log, text) {
     }
 
     const div = document.createElement('div');
-    div.className = 'mt-4 mb-1.5 rounded-lg bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700/50 px-3.5 py-2.5';
+    div.className = 'mt-4 mb-1.5 rounded-lg bg-zinc-50 dark:bg-cc-panel border border-zinc-200 dark:border-cc-line3 px-3.5 py-2.5';
     div.innerHTML = `
-        <div class="flex items-center gap-1.5 mb-1"><span class="inline-flex items-center shrink-0 px-1.5 py-0.5 rounded text-[11px] font-mono font-semibold uppercase tracking-wider bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300">you</span></div>
-        <div class="md-body text-zinc-800 dark:text-zinc-200 text-sm leading-relaxed">${marked.parse(text, { breaks: true })}</div>
+        <div class="flex items-center gap-1.5 mb-1"><span class="inline-flex items-center shrink-0 px-1.5 py-0.5 rounded text-[11px] font-mono font-semibold uppercase tracking-wider bg-zinc-200 dark:bg-cc-line3 text-zinc-600 dark:text-cc-soft">you</span></div>
+        <div class="md-body text-zinc-800 dark:text-cc-ink text-sm leading-relaxed">${marked.parse(text, { breaks: true })}</div>
     `;
     log.appendChild(div);
 }
@@ -1017,9 +1017,9 @@ function getOrCreateToolGroup(log) {
     const last = log.lastElementChild;
     if (last && last.classList.contains('tool-group')) return last;
     const details = document.createElement('details');
-    details.className = 'tool-group my-1.5 ml-1 border-l border-zinc-200 dark:border-zinc-800 pl-3';
+    details.className = 'tool-group my-1.5 ml-1 border-l border-zinc-200 dark:border-cc-line pl-3';
     const summary = document.createElement('summary');
-    summary.className = 'text-zinc-400 dark:text-zinc-600 cursor-pointer hover:text-zinc-500 select-none text-xs font-mono';
+    summary.className = 'text-zinc-400 dark:text-cc-dim cursor-pointer hover:text-zinc-500 select-none text-xs font-mono';
     summary.innerHTML = '<span class="tool-group-label">working…</span>';
     details.appendChild(summary);
     log.appendChild(details);
@@ -1050,7 +1050,7 @@ function appendToolCall(log, data) {
 
     if (data.tool === 'TodoWrite' && data.todos) {
         const list = document.createElement('div');
-        list.className = 'text-zinc-600 dark:text-zinc-400 text-xs leading-relaxed';
+        list.className = 'text-zinc-600 dark:text-cc-mut text-xs leading-relaxed';
         data.todos.forEach(t => {
             const item = document.createElement('div');
             item.className = 'flex items-center gap-1.5';
@@ -1062,7 +1062,7 @@ function appendToolCall(log, data) {
         row.appendChild(list);
     } else {
         const label = document.createElement('span');
-        label.className = 'text-zinc-500 dark:text-zinc-500 break-all';
+        label.className = 'text-zinc-500 dark:text-cc-dim break-all';
         label.textContent = data.label || '';
         row.appendChild(label);
     }
@@ -1077,10 +1077,10 @@ function appendResult(log, data) {
     const details = document.createElement('details');
     details.className = 'ml-6 py-0.5';
     const summary = document.createElement('summary');
-    summary.className = 'text-zinc-400 dark:text-zinc-600 cursor-pointer hover:text-zinc-500 select-none text-xs font-mono';
+    summary.className = 'text-zinc-400 dark:text-cc-dim cursor-pointer hover:text-zinc-500 select-none text-xs font-mono';
     summary.textContent = 'output (' + formatBytes(data.length || text.length) + ')';
     const content = document.createElement('div');
-    content.className = 'md-body mt-1 text-xs text-zinc-500 dark:text-zinc-400 max-h-48 overflow-y-auto bg-zinc-50 dark:bg-zinc-950 rounded p-2 border border-zinc-100 dark:border-zinc-800';
+    content.className = 'md-body mt-1 text-xs text-zinc-500 dark:text-cc-mut max-h-48 overflow-y-auto bg-zinc-50 dark:bg-cc-bg rounded p-2 border border-zinc-100 dark:border-cc-line';
     content.innerHTML = marked.parse(text, { breaks: true });
     details.appendChild(summary);
     details.appendChild(content);
@@ -1090,7 +1090,7 @@ function appendResult(log, data) {
 function appendComplete(log, data) {
     collapseToolGroup(log);
     const div = document.createElement('div');
-    div.className = 'flex items-center gap-2 py-2 mt-2 mb-1 border-t border-zinc-100 dark:border-zinc-800';
+    div.className = 'flex items-center gap-2 py-2 mt-2 mb-1 border-t border-zinc-100 dark:border-cc-line';
     const icon = document.createElement('span');
     icon.className = 'inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-500/15 text-emerald-500 text-xs shrink-0';
     icon.textContent = '✓';

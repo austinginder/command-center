@@ -13,8 +13,10 @@ body {
     background-size: 22px 22px;
 }
 .dark body {
-    background-image: radial-gradient(circle, rgba(244, 244, 245, 0.045) 1px, transparent 1px);
+    background-image: radial-gradient(circle, rgba(255, 255, 255, 0.028) 1px, transparent 1px);
+    background-size: 26px 26px;
 }
+.dark ::selection { background: rgba(52, 211, 153, 0.30); color: #eafff5; }
 
 /* ─── Radar (logo + illustrations) ─────────────────────────── */
 .radar-sweep {
@@ -62,7 +64,7 @@ body {
     font-size: 0.9em;
     font-family: 'JetBrains Mono', monospace;
 }
-.dark .md-body code { background: #27272a; color: #e4e4e7; }
+.dark .md-body code { background: #1a231e; color: #e8ece9; }
 .md-body pre {
     background: #18181b;
     color: #e4e4e7;
@@ -74,18 +76,19 @@ body {
     font-size: 0.85em;
     line-height: 1.6;
 }
+.dark .md-body pre { background: #0a0f0c; border-color: #1f2a24; }
 .md-body pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
 .md-body blockquote { border-left: 2px solid #d4d4d8; padding-left: 0.875rem; color: #71717a; margin: 0.5rem 0; }
-.dark .md-body blockquote { border-color: #3f3f46; }
+.dark .md-body blockquote { border-color: #24312a; }
 .md-body a { color: #3b82f6; text-decoration: none; }
 .md-body a:hover { text-decoration: underline; }
 .dark .md-body a { color: #60a5fa; }
 .md-body strong { font-weight: 600; }
 .md-body hr { border-top: 1px solid #e4e4e7; margin: 0.75rem 0; }
-.dark .md-body hr { border-color: #27272a; }
+.dark .md-body hr { border-color: #1f2a24; }
 .md-body table { border-collapse: collapse; margin: 0.5rem 0; font-size: 0.9em; display: block; overflow-x: auto; }
 .md-body th, .md-body td { border: 1px solid #e4e4e7; padding: 0.25rem 0.6rem; text-align: left; }
-.dark .md-body th, .dark .md-body td { border-color: #3f3f46; }
+.dark .md-body th, .dark .md-body td { border-color: #24312a; }
 .md-body img { max-width: 100%; border-radius: 6px; }
 
 /* ─── Deep Search Highlights ───────────────────────────────── */
@@ -104,8 +107,8 @@ details.tool-group[open] > summary .tool-group-label::before { content: '▾ '; 
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #a1a1aa; }
-.dark ::-webkit-scrollbar-thumb { background: #3f3f46; }
-.dark ::-webkit-scrollbar-thumb:hover { background: #52525b; }
+.dark ::-webkit-scrollbar-thumb { background: #24312a; }
+.dark ::-webkit-scrollbar-thumb:hover { background: #2a3830; }
 
 /* ─── Activity Heatmap ─────────────────────────────────────── */
 /* Sequential emerald ramp - monotone lightness per mode (dark gets its own
@@ -115,36 +118,36 @@ details.tool-group[open] > summary .tool-group-label::before { content: '▾ '; 
 .hm-l2 { fill: #34d399; }
 .hm-l3 { fill: #059669; }
 .hm-l4 { fill: #065f46; }
-.dark .hm-l0 { fill: #27272a; }
-.dark .hm-l1 { fill: #064e3b; }
-.dark .hm-l2 { fill: #047857; }
-.dark .hm-l3 { fill: #10b981; }
-.dark .hm-l4 { fill: #6ee7b7; }
+.dark .hm-l0 { fill: #151c18; }
+.dark .hm-l1 { fill: #0b3f2b; }
+.dark .hm-l2 { fill: #0f6a44; }
+.dark .hm-l3 { fill: #16a866; }
+.dark .hm-l4 { fill: #42e39b; }
 .hm-cell { cursor: pointer; }
 .hm-cell:hover { stroke: rgba(24, 24, 27, 0.5); stroke-width: 1; }
 .dark .hm-cell:hover { stroke: rgba(244, 244, 245, 0.6); }
 .hm-selected, .hm-selected:hover { stroke: #18181b; stroke-width: 1.5; }
-.dark .hm-selected, .dark .hm-selected:hover { stroke: #f4f4f5; }
+.dark .hm-selected, .dark .hm-selected:hover { stroke: #f2f6f3; }
 .hm-label { fill: #a1a1aa; font-size: 9px; font-family: 'JetBrains Mono', monospace; }
-.dark .hm-label { fill: #71717a; }
+.dark .hm-label { fill: #5c665f; }
 
 #heatmap-tooltip {
     position: fixed;
     z-index: 50;
     pointer-events: none;
-    background: #18181b;
-    color: #f4f4f5;
-    border: 1px solid #3f3f46;
-    border-radius: 6px;
-    padding: 0.4rem 0.6rem;
+    background: #141a16;
+    color: #f2f6f3;
+    border: 1px solid #2a3830;
+    border-radius: 9px;
+    padding: 0.5rem 0.7rem;
     font-size: 11px;
     font-family: 'JetBrains Mono', monospace;
     line-height: 1.5;
     white-space: nowrap;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
 }
-#heatmap-tooltip .hm-tip-value { font-weight: 600; }
-#heatmap-tooltip .hm-tip-sub { color: #a1a1aa; }
+#heatmap-tooltip .hm-tip-value { font-weight: 700; }
+#heatmap-tooltip .hm-tip-sub { color: #9aa59e; }
 
 /* ─── Focus Rings ──────────────────────────────────────────── */
 input:focus, select:focus {
