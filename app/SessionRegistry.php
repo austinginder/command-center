@@ -3,7 +3,7 @@
 /**
  * Central registry / dispatcher for session providers.
  *
- * Provider contract — every provider class must implement these static methods:
+ * Provider contract - every provider class must implement these static methods:
  *
  *   sourceId()                                     : string  // 'claude', 't3code', ...
  *   sourceLabel()                                  : string  // human-readable name
@@ -67,7 +67,7 @@ class SessionRegistry {
 					return $id;
 				}
 			} catch ( \Throwable $e ) {
-				// Provider unavailable — skip.
+				// Provider unavailable - skip.
 			}
 		}
 		$cache[ $sessionId ] = null;
@@ -227,7 +227,7 @@ class SessionRegistry {
 
 			return SearchIndex::search( $query, $project, $source );
 		} catch ( \Throwable $e ) {
-			// Fall back to Claude's legacy grep path — non-Claude providers have no
+			// Fall back to Claude's legacy grep path - non-Claude providers have no
 			// equivalent, so they return empty when FTS is broken rather than
 			// surfacing Claude results under the wrong source.
 			if ( in_array( $source, [ 't3code', 'kimi', 'opencode', 'antigravity', 'grok' ], true ) ) {

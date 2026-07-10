@@ -1,6 +1,6 @@
 <?php
 /**
- * SPA HTML shell — single entry point for all view routes.
+ * SPA HTML shell - single entry point for all view routes.
  * Loads Tailwind CDN, marked.js, and app.js.
  */
 ?>

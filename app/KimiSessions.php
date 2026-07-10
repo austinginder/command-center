@@ -1,19 +1,19 @@
 <?php
 
 /**
- * Kimi (Moonshot) session provider — reads from ~/.kimi/sessions.
+ * Kimi (Moonshot) session provider - reads from ~/.kimi/sessions.
  *
  * Kimi CLI lays sessions out as:
  *
- *   ~/.kimi/kimi.json                                — top-level config; lists work_dirs[].path
- *   ~/.kimi/sessions/{md5(work_dir)}/{uuid}/state.json    — metadata (custom_title, archived, …)
- *   ~/.kimi/sessions/{md5(work_dir)}/{uuid}/wire.jsonl    — wire-protocol event log w/ unix-float timestamps
- *   ~/.kimi/sessions/{md5(work_dir)}/{uuid}/context.jsonl — full LLM context (system prompt + role/content)
+ *   ~/.kimi/kimi.json                                - top-level config; lists work_dirs[].path
+ *   ~/.kimi/sessions/{md5(work_dir)}/{uuid}/state.json    - metadata (custom_title, archived, …)
+ *   ~/.kimi/sessions/{md5(work_dir)}/{uuid}/wire.jsonl    - wire-protocol event log w/ unix-float timestamps
+ *   ~/.kimi/sessions/{md5(work_dir)}/{uuid}/context.jsonl - full LLM context (system prompt + role/content)
  *
  * The directory hash is md5() of the worktree path, so we recover project
  * paths by md5'ing every kimi.json work_dirs entry and building a reverse
  * map. Hashes that don't appear in kimi.json fall through to a "(unknown)"
- * project — those sessions remain visible/searchable, just unattached.
+ * project - those sessions remain visible/searchable, just unattached.
  *
  * wire.jsonl is treated as the canonical session file: it has timestamps,
  * tool calls, and assistant text in stream order.
@@ -63,7 +63,7 @@ class KimiSessions {
 
 	/**
 	 * Concat user input + assistant text parts for FTS. Reasoning ("think")
-	 * blocks and tool I/O are intentionally skipped — they bloat the index
+	 * blocks and tool I/O are intentionally skipped - they bloat the index
 	 * and hurt relevance on user-intent queries.
 	 */
 	public static function extractSessionText( array $session ): string {
@@ -425,7 +425,7 @@ class KimiSessions {
 	// ─── SSE stream ─────────────────────────────────────────────
 
 	/**
-	 * History-only replay — Kimi has its own TTY UI for live streaming.
+	 * History-only replay - Kimi has its own TTY UI for live streaming.
 	 * Mirrors T3CodeSessions / OpenCodeSessions behaviour.
 	 */
 	public static function handleStream( string $sessionId, int $runnerPid = 0 ): void {
@@ -553,7 +553,7 @@ class KimiSessions {
 
 	/**
 	 * Pull a string out of a Kimi tool result. `return_value.output` is
-	 * usually a string but can be structured — handle both.
+	 * usually a string but can be structured - handle both.
 	 */
 	private static function extractToolOutput( $rv ): string {
 		if ( is_string( $rv ) ) {

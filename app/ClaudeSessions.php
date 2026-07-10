@@ -436,7 +436,7 @@ class ClaudeSessions {
 
 			$sessions = self::listSessions( $project );
 
-			// Incremental index update — only re-index changed files.
+			// Incremental index update - only re-index changed files.
 			$stale = SearchIndex::getStaleSessions( $sessions );
 			if ( ! empty( $stale ) ) {
 				SearchIndex::indexSessions( $stale );
@@ -466,7 +466,7 @@ class ClaudeSessions {
 			return [];
 		}
 
-		// Determine search directory — derive from actual file paths when project-scoped.
+		// Determine search directory - derive from actual file paths when project-scoped.
 		$searchDir = self::claudeDir() . '/projects';
 		if ( $project && ! empty( $sessionMap ) ) {
 			$firstFile = array_key_first( $sessionMap );

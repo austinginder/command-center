@@ -1,13 +1,13 @@
 <?php
 /**
- * FlowExtractor — reconstruct the "direction flow" of a project from Claude Code
+ * FlowExtractor - reconstruct the "direction flow" of a project from Claude Code
  * session transcripts. The code the agent wrote is disposable; the sequence of
  * human instructions that steered it is the durable, learnable artifact.
  *
  * Produces three views over the same recovered record:
  *   - cliffnotes : the learn-from-it distillation (arc, steering, course-corrections, cost)
  *   - forensic   : every user turn, verbatim, interleaved with a one-line agent trace
- *   - json       : structured payload — the ingest format for a "browse the build" site
+ *   - json       : structured payload - the ingest format for a "browse the build" site
  */
 class FlowExtractor {
 
@@ -445,7 +445,7 @@ class FlowExtractor {
 	}
 
 	/**
-	 * Editor brief — a single deterministic bundle an AI agent uses to WRITE the recap.
+	 * Editor brief - a single deterministic bundle an AI agent uses to WRITE the recap.
 	 * Does NOT write prose itself. Bundles: identity, manifest, arc (the wake), spine,
 	 * tacks, the genesis session's interleaved flow (verbatim headings for quotes), and
 	 * the decoded landmark screenshots (paths + paired text for the agent to caption).
@@ -472,7 +472,7 @@ class FlowExtractor {
 		};
 
 		// Feature session: the most representative session (headings + screenshots),
-		// NOT merely the earliest — some projects open with a throwaway setup session.
+		// NOT merely the earliest - some projects open with a throwaway setup session.
 		// Its interleaved flow supplies the verbatim quotes, and its screenshots supply
 		// the landmarks, so quotes and landmarks always line up in the same story.
 		$featureMeta = $flow['sessions'][0];

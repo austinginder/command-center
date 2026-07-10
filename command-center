@@ -1,7 +1,7 @@
 #!/usr/bin/env php
 <?php
 /**
- * Command Center CLI — search conversation history across AI coding tools.
+ * Command Center CLI - search conversation history across AI coding tools.
  *
  * Usage:
  *   command-center <query>                    Search conversations (default)
@@ -146,7 +146,7 @@ function cmdSearch( string $query, array $flags, int $limit, bool $useJson, bool
 	$project = resolveProject( $flags['project'] ?? null );
 
 	if ( ! empty( $flags['no-update'] ) ) {
-		// Skip incremental update — query the index directly.
+		// Skip incremental update - query the index directly.
 		$results = SearchIndex::search( $query, $project, $source, $limit );
 	} else {
 		$results = SessionRegistry::deepSearch( $query, $project, $source );
@@ -299,7 +299,7 @@ function cmdOpen( string $sessionId ): void {
  *                    (manifest + spine + tacks + genesis interleaved flow + decoded
  *                    landmark screenshots). --images-dir <dir> sets where images land.
  *   --json           Structured payload (the "browse the build" ingest format)
- * With no flags: the cliffnotes — arc, steering, course-corrections, model + cost.
+ * With no flags: the cliffnotes - arc, steering, course-corrections, model + cost.
  */
 function cmdFlow( string $project, array $flags, bool $useJson, bool $useColor ): void {
 	$sessionId = $flags['session'] ?? null;
@@ -344,7 +344,7 @@ function cmdFlow( string $project, array $flags, bool $useJson, bool $useColor )
 		exit( 2 );
 	}
 
-	// Editor brief — one bundle with everything an agent needs to WRITE the recap
+	// Editor brief - one bundle with everything an agent needs to WRITE the recap
 	// (manifest + spine + tacks + genesis interleaved flow + decoded landmark images).
 	if ( ! empty( $flags['editor'] ) ) {
 		$imagesDir = $flags['images-dir'] ?? ( sys_get_temp_dir() . '/rutter-landmarks/' . preg_replace( '/[^a-z0-9]+/i', '-', $project ) );
@@ -441,7 +441,7 @@ function renderCliffnotes( array $f, bool $c ): void {
 	}
 	echo "\n";
 
-	// Course-corrections — the highest-signal learning material.
+	// Course-corrections - the highest-signal learning material.
 	if ( ! empty( $f['corrections'] ) ) {
 		echo $b( "COURSE-CORRECTIONS " ) . $d( "(where the human redirected the agent)\n" );
 		foreach ( $f['corrections'] as $cor ) {
@@ -459,7 +459,7 @@ function renderProjectForensic( array $f, bool $full, bool $c ): void {
 	// Re-parse each session for the verbatim/interleaved view.
 	$acc = fn( $s ) => $c ? "\033[1;33m{$s}\033[0m" : $s;
 	$d   = fn( $s ) => dim( $s, $c );
-	echo "\n" . bold( $f['project']['name'] . ' — forensic direction log', $c ) . "\n";
+	echo "\n" . bold( $f['project']['name'] . ' - forensic direction log', $c ) . "\n";
 	foreach ( FlowExtractor::listProjectSessions( $f['project']['dir'] ) as $s ) {
 		$p = FlowExtractor::parseSession( $s['file'] );
 		$real = array_filter( $p['turns'], fn( $t ) => $t['role'] === 'user' && $t['kind'] !== 'interrupt' );
@@ -515,12 +515,12 @@ function resolveProject( ?string $input ): ?string {
 		return null;
 	}
 
-	// Full path — use directly.
+	// Full path - use directly.
 	if ( $input[0] === '/' ) {
 		return $input;
 	}
 
-	// Basename — look up in known projects.
+	// Basename - look up in known projects.
 	$projects = SessionRegistry::listProjects();
 	foreach ( $projects as $p ) {
 		if ( $p['name'] === $input ) {
@@ -637,7 +637,7 @@ function dim( string $text, bool $useColor ): string {
 
 function showHelp(): void {
 	$help = <<<'HELP'
-Command Center — search conversation history across AI coding tools.
+Command Center - search conversation history across AI coding tools.
 
 Usage:
   command-center <query>                    Search conversations

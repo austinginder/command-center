@@ -486,14 +486,14 @@ class CommandCodeSessions {
 				$remaining = intval( $remaining / 3 );
 
 				if ( $choice === 0 ) {
-					// Slash — commit current buffer, start new.
+					// Slash - commit current buffer, start new.
 					$pathParts[] = $buf;
 					$buf = $rootParts[ $g + 1 ];
 				} elseif ( $choice === 1 ) {
-					// Dot — keep building the domain.
+					// Dot - keep building the domain.
 					$buf .= '.' . $rootParts[ $g + 1 ];
 				} else {
-					// Hyphen — keep building with a literal hyphen.
+					// Hyphen - keep building with a literal hyphen.
 					$buf .= '-' . $rootParts[ $g + 1 ];
 				}
 			}

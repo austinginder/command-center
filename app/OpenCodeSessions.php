@@ -1,15 +1,15 @@
 <?php
 
 /**
- * OpenCode session provider — reads from $XDG_DATA_HOME/opencode/storage.
+ * OpenCode session provider - reads from $XDG_DATA_HOME/opencode/storage.
  *
  * OpenCode (sst/opencode) is a terminal coding agent that stores every
  * entity as its own JSON file. A "conversation" spans three directories:
  *
- *   storage/project/{projectID}.json          — workspace records
- *   storage/session/{projectID}/ses_*.json    — session metadata
- *   storage/message/{sessionID}/msg_*.json    — one file per turn
- *   storage/part/{messageID}/prt_*.json       — message content chunks
+ *   storage/project/{projectID}.json          - workspace records
+ *   storage/session/{projectID}/ses_*.json    - session metadata
+ *   storage/message/{sessionID}/msg_*.json    - one file per turn
+ *   storage/part/{messageID}/prt_*.json       - message content chunks
  *                                               (type=text|reasoning|tool|step-start|step-finish)
  *
  * ProjectID is sha1(worktree-path) for real projects, or the literal
@@ -47,7 +47,7 @@ class OpenCodeSessions {
 	 *
 	 * Session metadata rarely changes after creation; new turns write new
 	 * message/part files. Watching the message dir catches live growth cheaply
-	 * — we never have to stat individual files.
+	 * - we never have to stat individual files.
 	 */
 	public static function fingerprint( array $session ): ?array {
 		$id   = $session['id'] ?? '';
@@ -76,7 +76,7 @@ class OpenCodeSessions {
 
 	/**
 	 * Concat every text-type part, grouped by message in chronological order.
-	 * Reasoning parts and tool I/O are intentionally skipped for FTS — they
+	 * Reasoning parts and tool I/O are intentionally skipped for FTS - they
 	 * inflate the index and hurt result relevance on user-intent queries.
 	 */
 	public static function extractSessionText( array $session ): string {
@@ -374,7 +374,7 @@ class OpenCodeSessions {
 						];
 					}
 				}
-				// reasoning, step-start, step-finish — skipped for replay.
+				// reasoning, step-start, step-finish - skipped for replay.
 			}
 		}
 

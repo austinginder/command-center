@@ -36,7 +36,7 @@ command-center status
 
 ### search (default)
 
-Search is the default — no subcommand needed.
+Search is the default - no subcommand needed.
 
 ```bash
 # These are equivalent
@@ -114,10 +114,10 @@ command-center open abc123-def4-5678-abcd-ef1234567890
 
 Reconstruct **how a project was built** from its session transcripts. The code the
 agent wrote is disposable; the sequence of human instructions that steered it is the
-durable, learnable artifact. Reads local `.jsonl` files only — nothing is sent anywhere.
+durable, learnable artifact. Reads local `.jsonl` files only - nothing is sent anywhere.
 
 ```bash
-# Cliffnotes — arc, steering profile, course-corrections, model + token cost
+# Cliffnotes - arc, steering profile, course-corrections, model + token cost
 command-center flow dismissed
 
 # Forensic play-by-play (every user turn + a one-line agent trace per turn)
@@ -129,15 +129,15 @@ command-center flow dismissed --forensic
 # Deep-dive a single session (full or partial id)
 command-center flow --session 45b81ec3
 
-# Structured payload — the "browse the build" ingest format
+# Structured payload - the "browse the build" ingest format
 command-center flow dismissed --json
 
-# Editor brief — one bundle an agent uses to WRITE the recap
+# Editor brief - one bundle an agent uses to WRITE the recap
 command-center flow dismissed --editor --images-dir /tmp/landmarks
 ```
 
 **`--editor`** emits a single JSON brief with everything an agent needs to author a build
-recap in one pass — it does NOT write prose itself. Contents: `identity` (suggested slug,
+recap in one pass - it does NOT write prose itself. Contents: `identity` (suggested slug,
 span, model), `manifest` (sessions/headings/landmarks/tokens…), `arc` (the wake), `spine`
 (first heading per session), `tacks` (course-corrections), `genesis` (the first session's
 interleaved flow, with **verbatim** headings to quote), and `landmarks` (the genesis
@@ -145,10 +145,10 @@ session's screenshots decoded to `--images-dir` with paired text, for the agent 
 This is the input to `/rutter-sync`.
 
 The cliffnotes surface the highest-signal learning material:
-- **The spine** — the first instruction of every session, which reads as the project's story.
-- **Course-corrections** — where the human redirected the agent (the part worth studying).
-- **Steering profile** — slash-command vs ad-hoc openers, screenshots handed over, links referenced, interrupts.
-- **Cost** — model(s) used, output tokens generated, fresh vs cached input tokens.
+- **The spine** - the first instruction of every session, which reads as the project's story.
+- **Course-corrections** - where the human redirected the agent (the part worth studying).
+- **Steering profile** - slash-command vs ad-hoc openers, screenshots handed over, links referenced, interrupts.
+- **Cost** - model(s) used, output tokens generated, fresh vs cached input tokens.
 
 The `--json` output is designed as an ingest format for a public "browse how it was built"
 site (GitHub-for-AI-builds): project → span → totals → models → tokens → steering → spine →

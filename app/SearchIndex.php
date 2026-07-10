@@ -67,7 +67,7 @@ class SearchIndex {
 			$db->exec( 'ALTER TABLE session_files ADD COLUMN source TEXT NOT NULL DEFAULT "claude"' );
 		}
 
-		// Token usage columns (NULL = not yet computed — see backfillUsage()).
+		// Token usage columns (NULL = not yet computed - see backfillUsage()).
 		if ( ! in_array( 'tokens_output', $cols, true ) ) {
 			$db->exec( 'ALTER TABLE session_files ADD COLUMN tokens_input INTEGER' );
 			$db->exec( 'ALTER TABLE session_files ADD COLUMN tokens_output INTEGER' );
@@ -79,7 +79,7 @@ class SearchIndex {
 		$db->exec( 'CREATE INDEX IF NOT EXISTS idx_sf_source    ON session_files(source)' );
 		$db->exec( 'CREATE INDEX IF NOT EXISTS idx_sf_timestamp ON session_files(timestamp_ms DESC)' );
 
-		// FTS5 virtual table. `source` is UNINDEXED — we filter via JOIN on session_files.
+		// FTS5 virtual table. `source` is UNINDEXED - we filter via JOIN on session_files.
 		$r = $db->querySingle( "SELECT name FROM sqlite_master WHERE type='table' AND name='sessions_fts'" );
 		if ( ! $r ) {
 			$db->exec( "CREATE VIRTUAL TABLE sessions_fts USING fts5(session_id UNINDEXED, source UNINDEXED, content, tokenize = 'unicode61')" );
@@ -93,7 +93,7 @@ class SearchIndex {
 				}
 			}
 			if ( ! in_array( 'source', $ftsCols, true ) ) {
-				// Safe: drop and recreate — callers will repopulate via rebuild() on next search.
+				// Safe: drop and recreate - callers will repopulate via rebuild() on next search.
 				$db->exec( 'DROP TABLE IF EXISTS sessions_fts' );
 				$db->exec( "CREATE VIRTUAL TABLE sessions_fts USING fts5(session_id UNINDEXED, source UNINDEXED, content, tokenize = 'unicode61')" );
 				$db->exec( 'DELETE FROM session_files' ); // Forces re-index on next stale check.
@@ -367,7 +367,7 @@ class SearchIndex {
 	/**
 	 * Compute token usage for already-indexed rows that predate the usage
 	 * columns (tokens_output IS NULL). Providers that track nothing get 0s so
-	 * each row is only visited once. Batched — call repeatedly until
+	 * each row is only visited once. Batched - call repeatedly until
 	 * remaining hits 0.
 	 */
 	public static function backfillUsage( int $limit = 500 ): array {

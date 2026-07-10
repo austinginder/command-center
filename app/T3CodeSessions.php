@@ -1,18 +1,18 @@
 <?php
 
 /**
- * T3 Code session provider — reads from ~/.t3/userdata/state.sqlite.
+ * T3 Code session provider - reads from ~/.t3/userdata/state.sqlite.
  *
  * T3 Code (pingdotgg/t3code) is a local web GUI for coding agents (Claude, Codex).
  * Instead of per-session JSONL files, it event-sources everything into a single
  * SQLite database and materializes projections we can SELECT from directly.
  *
  * Relevant tables:
- *   projection_projects         — workspaces T3 has seen
- *   projection_threads          — conversations (our "session" equivalent)
- *   projection_thread_messages  — user/assistant text per thread
- *   projection_thread_activities — tool calls, task progress, errors, etc.
- *   provider_session_runtime    — provider metadata (claudeAgent, codex, ...)
+ *   projection_projects         - workspaces T3 has seen
+ *   projection_threads          - conversations (our "session" equivalent)
+ *   projection_thread_messages  - user/assistant text per thread
+ *   projection_thread_activities - tool calls, task progress, errors, etc.
+ *   provider_session_runtime    - provider metadata (claudeAgent, codex, ...)
  *
  * We open the DB read-only so concurrent T3 writes aren't disturbed.
  */
@@ -48,7 +48,7 @@ class T3CodeSessions {
 	}
 
 	/**
-	 * Return the SQLite path as the "session file" — gives SearchIndex/stream
+	 * Return the SQLite path as the "session file" - gives SearchIndex/stream
 	 * a stable handle to fingerprint against.
 	 */
 	public static function findSessionFile( string $id, ?string $project = null ): ?string {
@@ -315,7 +315,7 @@ class T3CodeSessions {
 			}
 		}
 
-		// Activities — we care about tool_call / tool_result pairs and errors.
+		// Activities - we care about tool_call / tool_result pairs and errors.
 		$actStmt = $db->prepare( '
 			SELECT activity_id, kind, tone, summary, payload_json, created_at, sequence
 			FROM projection_thread_activities
@@ -399,7 +399,7 @@ class T3CodeSessions {
 	/**
 	 * T3 Code threads don't have a tailable file like Claude's JSONL.
 	 * For v1 we replay the full conversation and emit `done`. T3 Code has its
-	 * own WebSocket UI for live streaming — Command Center just shows history.
+	 * own WebSocket UI for live streaming - Command Center just shows history.
 	 */
 	public static function handleStream( string $sessionId, int $runnerPid = 0 ): void {
 		if ( ! self::hasSession( $sessionId ) ) {

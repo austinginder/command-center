@@ -1,14 +1,14 @@
 <?php
 
 /**
- * Grok Code (xAI) session provider — reads from ~/.grok/sessions.
+ * Grok Code (xAI) session provider - reads from ~/.grok/sessions.
  *
  * Layout (see ~/.grok/docs/user-guide/17-sessions.md):
  *
  *   ~/.grok/sessions/<url-encoded-cwd>/<session-id>/
- *     summary.json          — title, timestamps, model, message counts
- *     updates.jsonl         — ACP session/update stream (authoritative conversation)
- *     chat_history.jsonl    — raw model messages (not used for UI replay)
+ *     summary.json          - title, timestamps, model, message counts
+ *     updates.jsonl         - ACP session/update stream (authoritative conversation)
+ *     chat_history.jsonl    - raw model messages (not used for UI replay)
  *     plan.json / signals.json / rewind_points.jsonl / subagents/ …
  *
  * When the encoded cwd exceeds 255 bytes, Grok uses a slug+hash directory
@@ -481,7 +481,7 @@ class GrokSessions {
 	// ─── SSE stream ─────────────────────────────────────────────
 
 	/**
-	 * History-only replay — Grok has its own TUI for live streaming.
+	 * History-only replay - Grok has its own TUI for live streaming.
 	 */
 	public static function handleStream( string $sessionId, int $runnerPid = 0 ): void {
 		if ( ! self::hasSession( $sessionId ) ) {
@@ -577,7 +577,7 @@ class GrokSessions {
 
 	/**
 	 * Human project label. Cove sites are almost always …/Sites/<name>.localhost/public,
-	 * so "public" as a basename is useless — prefer the parent folder in that case.
+	 * so "public" as a basename is useless - prefer the parent folder in that case.
 	 */
 	private static function projectDisplayName( string $path ): string {
 		$base = basename( $path );
@@ -775,7 +775,7 @@ class GrokSessions {
 			// keep description; describeToolCall may use command
 		}
 		if ( isset( $input['old_string'] ) && ! isset( $input['old_str'] ) ) {
-			// Edit helpers look at old_string/new_string or similar — leave as-is
+			// Edit helpers look at old_string/new_string or similar - leave as-is
 		}
 		return $input;
 	}

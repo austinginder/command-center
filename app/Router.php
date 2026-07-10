@@ -6,7 +6,7 @@ class Router {
 		$uri  = parse_url( $_SERVER['REQUEST_URI'], PHP_URL_PATH );
 		$path = rtrim( $uri, '/' ) ?: '/';
 
-		// Unified SSE stream — handles both agents and raw sessions.
+		// Unified SSE stream - handles both agents and raw sessions.
 		if ( $path === '/stream' ) {
 			require BASE_DIR . '/stream.php';
 			return;

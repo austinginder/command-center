@@ -1,7 +1,7 @@
 /* ─── Base ──────────────────────────────────────────────────── */
 * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
 
-/* Global scale — rem-based Tailwind sizes (text + spacing) all key off this. */
+/* Global scale - rem-based Tailwind sizes (text + spacing) all key off this. */
 html { font-size: 115%; }
 
 /* Smooth transitions on interactive elements */
@@ -108,7 +108,7 @@ details.tool-group[open] > summary .tool-group-label::before { content: '▾ '; 
 .dark ::-webkit-scrollbar-thumb:hover { background: #52525b; }
 
 /* ─── Activity Heatmap ─────────────────────────────────────── */
-/* Sequential emerald ramp — monotone lightness per mode (dark gets its own
+/* Sequential emerald ramp - monotone lightness per mode (dark gets its own
    steps anchored bright-on-dark, not a flipped light ramp). */
 .hm-l0 { fill: #f4f4f5; }
 .hm-l1 { fill: #a7f3d0; }

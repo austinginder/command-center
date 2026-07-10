@@ -1,5 +1,5 @@
 <?php
-// JSON API dispatcher — session index endpoints.
+// JSON API dispatcher - session index endpoints.
 
 header( 'Content-Type: application/json' );
 
@@ -8,7 +8,7 @@ $uri    = parse_url( $_SERVER['REQUEST_URI'], PHP_URL_PATH );
 $path   = preg_replace( '#^/api#', '', $uri );
 $path   = rtrim( $path, '/' ) ?: '/';
 
-// GET /api/sessions — list sessions across providers (optionally filtered by source/project)
+// GET /api/sessions - list sessions across providers (optionally filtered by source/project)
 if ( $method === 'GET' && $path === '/sessions' ) {
 	$project = $_GET['project'] ?? null;
 	$source  = $_GET['source']  ?? null;
@@ -16,14 +16,14 @@ if ( $method === 'GET' && $path === '/sessions' ) {
 	exit;
 }
 
-// GET /api/sessions/projects — list unique projects across providers
+// GET /api/sessions/projects - list unique projects across providers
 if ( $method === 'GET' && $path === '/sessions/projects' ) {
 	$source = $_GET['source'] ?? null;
 	echo json_encode( SessionRegistry::listProjects( $source ?: null ) );
 	exit;
 }
 
-// GET /api/sessions/sources — available providers
+// GET /api/sessions/sources - available providers
 if ( $method === 'GET' && $path === '/sessions/sources' ) {
 	$out = [];
 	foreach ( SessionRegistry::providers() as $id => $class ) {
@@ -33,7 +33,7 @@ if ( $method === 'GET' && $path === '/sessions/sources' ) {
 	exit;
 }
 
-// POST /api/sessions/search/reindex — full index rebuild across all providers
+// POST /api/sessions/search/reindex - full index rebuild across all providers
 if ( $method === 'POST' && $path === '/sessions/search/reindex' ) {
 	set_time_limit( 120 );
 	require_once BASE_DIR . '/app/SearchIndex.php';
@@ -42,14 +42,14 @@ if ( $method === 'POST' && $path === '/sessions/search/reindex' ) {
 	exit;
 }
 
-// GET /api/sessions/stats/daily — per-day session counts + token totals (heatmap)
+// GET /api/sessions/stats/daily - per-day session counts + token totals (heatmap)
 if ( $method === 'GET' && $path === '/sessions/stats/daily' ) {
 	require_once BASE_DIR . '/app/SearchIndex.php';
 	$project = $_GET['project'] ?? null;
 	$source  = $_GET['source']  ?? null;
 
 	// Keep the index fresh so today's sessions show up on the heatmap.
-	// Skipped when the backlog is large (first run) — the reindex button covers that.
+	// Skipped when the backlog is large (first run) - the reindex button covers that.
 	set_time_limit( 60 );
 	$sessions = SessionRegistry::listSessions( $project ?: null, $source ?: null );
 	$stale    = SearchIndex::getStaleSessions( $sessions );
@@ -61,7 +61,7 @@ if ( $method === 'GET' && $path === '/sessions/stats/daily' ) {
 	exit;
 }
 
-// POST /api/sessions/tokens/backfill — compute token usage for rows indexed before the usage columns existed
+// POST /api/sessions/tokens/backfill - compute token usage for rows indexed before the usage columns existed
 if ( $method === 'POST' && $path === '/sessions/tokens/backfill' ) {
 	set_time_limit( 600 );
 	require_once BASE_DIR . '/app/SearchIndex.php';
@@ -70,14 +70,14 @@ if ( $method === 'POST' && $path === '/sessions/tokens/backfill' ) {
 	exit;
 }
 
-// GET /api/sessions/search/status — index health/stats
+// GET /api/sessions/search/status - index health/stats
 if ( $method === 'GET' && $path === '/sessions/search/status' ) {
 	require_once BASE_DIR . '/app/SearchIndex.php';
 	echo json_encode( SearchIndex::status() );
 	exit;
 }
 
-// GET /api/sessions/search?q=<term>&project=<optional>&source=<optional> — deep search conversation content
+// GET /api/sessions/search?q=<term>&project=<optional>&source=<optional> - deep search conversation content
 if ( $method === 'GET' && $path === '/sessions/search' ) {
 	$q       = $_GET['q']       ?? '';
 	$project = $_GET['project'] ?? null;
@@ -94,7 +94,7 @@ if ( $method === 'GET' && $path === '/sessions/search' ) {
 	exit;
 }
 
-// GET /api/sessions/{id}/conversation?source=<optional> — get full conversation
+// GET /api/sessions/{id}/conversation?source=<optional> - get full conversation
 if ( $method === 'GET' && preg_match( '#^/sessions/([A-Za-z0-9_-]+)/conversation$#', $path, $m ) ) {
 	$source = $_GET['source'] ?? null;
 	echo json_encode( SessionRegistry::getConversation( $m[1], $source ?: null ) );

@@ -159,7 +159,7 @@ function copyWithFlash(btn, text, iconSel) {
 }
 
 // ─── Illustrations ───────────────────────────────────────────
-// Radar scope — sweep + blips (blip delays synced to the 5s sweep).
+// Radar scope - sweep + blips (blip delays synced to the 5s sweep).
 function illoRadar(cls = 'w-24 h-24') {
     return `<svg class="${cls} mx-auto text-zinc-300 dark:text-zinc-700" viewBox="0 0 96 96" fill="none" aria-hidden="true">
         <circle cx="48" cy="48" r="44" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 4"/>
@@ -178,7 +178,7 @@ function illoRadar(cls = 'w-24 h-24') {
     </svg>`;
 }
 
-// Drifting satellite with a dropped signal — for 404 / not-found.
+// Drifting satellite with a dropped signal - for 404 / not-found.
 function illoSatellite(cls = 'w-28 h-28') {
     return `<svg class="${cls} mx-auto text-zinc-300 dark:text-zinc-700" viewBox="0 0 96 96" fill="none" aria-hidden="true">
         <circle cx="14" cy="20" r="1" fill="currentColor" opacity="0.6"/>
@@ -237,7 +237,7 @@ function renderDashboard() {
             <div class="relative">
                 <svg class="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                 <input type="text" id="session-search" autocomplete="off" spellcheck="false"
-                    placeholder="Search sessions — Enter searches full conversation content"
+                    placeholder="Search sessions - Enter searches full conversation content"
                     class="w-full h-11 pl-10 pr-28 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-sm shadow-sm placeholder:text-zinc-400 dark:placeholder:text-zinc-600 text-zinc-900 dark:text-zinc-100">
                 <button id="deep-search-btn" disabled
                     class="absolute right-2 top-1/2 -translate-y-1/2 px-2.5 py-1 text-xs font-medium rounded-lg bg-zinc-900 text-zinc-100 dark:bg-zinc-100 dark:text-zinc-900 disabled:opacity-25 disabled:cursor-not-allowed transition-opacity">
@@ -639,7 +639,7 @@ function renderDashboard() {
                     <span>0 matches</span>
                     <button id="clear-deep-search" class="font-medium text-blue-400 hover:underline">clear</button>
                 </div>
-                ${emptyState(illoRadar(), 'no echoes on this frequency', 'nothing in conversation content matched — try different keywords')}`;
+                ${emptyState(illoRadar(), 'no echoes on this frequency', 'nothing in conversation content matched - try different keywords')}`;
             wireClearDeep(container);
             return;
         }
@@ -728,7 +728,7 @@ function renderDashboard() {
             updateURL();
             renderList();
         } catch (err) {
-            container.innerHTML = emptyState(illoSatellite('w-20 h-20'), 'sweep failed', 'the deep search errored — try again');
+            container.innerHTML = emptyState(illoSatellite('w-20 h-20'), 'sweep failed', 'the deep search errored - try again');
         } finally {
             if (btn) { btn.textContent = 'Deep search'; }
             updateDeepSearchBtn();
@@ -1052,7 +1052,7 @@ function appendComplete(log, data) {
     const tokens = data.usage ? usageSummary(data.usage) : '';
     const turns = data.turns ? data.turns + ' turns' : '';
     const meta = [tokens, turns].filter(Boolean).join(' / ');
-    msg.textContent = 'Turn complete' + (meta ? ' — ' + meta : '');
+    msg.textContent = 'Turn complete' + (meta ? ' - ' + meta : '');
     div.appendChild(icon);
     div.appendChild(msg);
     log.appendChild(div);
