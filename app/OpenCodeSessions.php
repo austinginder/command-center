@@ -1,20 +1,30 @@
 <?php
 
 /**
- * OpenCode session provider - reads from $XDG_DATA_HOME/opencode/storage.
+ * OpenCode session provider - reads from $XDG_DATA_HOME/opencode.
  *
- * OpenCode (sst/opencode) is a terminal coding agent that stores every
- * entity as its own JSON file. A "conversation" spans three directories:
+ * OpenCode (sst/opencode) has used two storage backends over its life:
  *
- *   storage/project/{projectID}.json          - workspace records
- *   storage/session/{projectID}/ses_*.json    - session metadata
- *   storage/message/{sessionID}/msg_*.json    - one file per turn
- *   storage/part/{messageID}/prt_*.json       - message content chunks
- *                                               (type=text|reasoning|tool|step-start|step-finish)
+ *   1. SQLite (current): opencode.db at the data-dir root, managed by drizzle.
+ *      Tables: project, session (typed columns), message + part (JSON `data`
+ *      column, same shapes as the old per-entity files). OpenCode's own
+ *      migration imports the legacy tree into the db on first run, so when
+ *      the db exists it is a superset of the file tree and wins.
  *
- * ProjectID is sha1(worktree-path) for real projects, or the literal
- * "global" for ad-hoc sessions without a worktree. We surface "global"
- * as a pseudo-project named "(global)" so those sessions remain searchable.
+ *   2. Legacy per-entity JSON files under storage/:
+ *      storage/project/{projectID}.json          - workspace records
+ *      storage/session/{projectID}/ses_*.json    - session metadata
+ *      storage/message/{sessionID}/msg_*.json    - one file per turn
+ *      storage/part/{messageID}/prt_*.json       - message content chunks
+ *                                                  (type=text|reasoning|tool|step-start|step-finish)
+ *
+ * We read the db when present and union in any legacy sessions the migration
+ * missed; installs that never migrated fall back to the file tree entirely.
+ *
+ * ProjectID is sha1(worktree-path) legacy / git-root-commit in the db for real
+ * projects, or the literal "global" for ad-hoc sessions without a worktree.
+ * We surface "global" as a pseudo-project named "(global)" so those sessions
+ * remain searchable.
  */
 class OpenCodeSessions {
 
@@ -31,27 +41,65 @@ class OpenCodeSessions {
 	}
 
 	public static function hasSession( string $sessionId ): bool {
-		return self::findSessionFile( $sessionId ) !== null;
+		if ( ! preg_match( '/^ses_[A-Za-z0-9]+$/', $sessionId ) ) {
+			return false;
+		}
+		if ( self::dbRows( 'SELECT 1 FROM session WHERE id = ?', [ $sessionId ] ) ) {
+			return true;
+		}
+		return self::findLegacySessionFile( $sessionId ) !== null;
 	}
 
+	/**
+	 * Canonical path for a session: its legacy JSON file when one exists,
+	 * otherwise the SQLite database that holds it.
+	 */
 	public static function findSessionFile( string $id, ?string $project = null ): ?string {
 		if ( ! preg_match( '/^ses_[A-Za-z0-9]+$/', $id ) ) {
 			return null;
 		}
+		$legacy = self::findLegacySessionFile( $id );
+		if ( $legacy ) {
+			return $legacy;
+		}
+		if ( self::dbRows( 'SELECT 1 FROM session WHERE id = ?', [ $id ] ) ) {
+			return self::dbPath();
+		}
+		return null;
+	}
+
+	private static function findLegacySessionFile( string $id ): ?string {
 		$matches = glob( self::storageDir() . '/session/*/' . $id . '.json' );
 		return $matches ? $matches[0] : null;
 	}
 
 	/**
-	 * Fingerprint = ( max(session-file mtime, message-dir mtime), message-file count ).
+	 * Fingerprint for incremental indexing.
 	 *
-	 * Session metadata rarely changes after creation; new turns write new
-	 * message/part files. Watching the message dir catches live growth cheaply
-	 * - we never have to stat individual files.
+	 * Db sessions: ( max(session/message time_updated), message count ).
+	 * Legacy tree: ( max(session-file mtime, message-dir mtime), message-file
+	 * count ) - new turns write new message/part files, so watching the dir
+	 * catches live growth cheaply without stat'ing individual files.
 	 */
 	public static function fingerprint( array $session ): ?array {
-		$id   = $session['id'] ?? '';
-		$file = self::findSessionFile( $id );
+		$id = $session['id'] ?? '';
+
+		$rows = self::dbRows(
+			'SELECT s.time_updated,
+			        (SELECT COUNT(*)           FROM message m WHERE m.session_id = s.id) AS messages,
+			        (SELECT MAX(m.time_updated) FROM message m WHERE m.session_id = s.id) AS latest
+			   FROM session s WHERE s.id = ?',
+			[ $id ]
+		);
+		if ( $rows ) {
+			$r = $rows[0];
+			return [
+				'mtime' => intval( max( (int) $r['time_updated'], (int) ( $r['latest'] ?? 0 ) ) / 1000 ),
+				'size'  => 1 + (int) $r['messages'],
+			];
+		}
+
+		$file = self::findLegacySessionFile( $id );
 		if ( ! $file ) {
 			return null;
 		}
@@ -80,41 +128,16 @@ class OpenCodeSessions {
 	 * inflate the index and hurt result relevance on user-intent queries.
 	 */
 	public static function extractSessionText( array $session ): string {
-		$id       = $session['id'] ?? '';
-		$msgDir   = self::storageDir() . '/message/' . $id;
-		$partRoot = self::storageDir() . '/part';
-
-		if ( ! is_dir( $msgDir ) ) {
-			return $session['display'] ?? '';
-		}
-
+		$id    = $session['id'] ?? '';
 		$parts = [];
 
 		if ( ! empty( $session['display'] ) ) {
 			$parts[] = $session['display'];
 		}
 
-		$messages = glob( $msgDir . '/msg_*.json' ) ?: [];
-		$ordered  = [];
-		foreach ( $messages as $path ) {
-			$msg = self::readJson( $path );
-			if ( ! $msg ) {
-				continue;
-			}
-			$ordered[] = [
-				'id'      => $msg['id'] ?? basename( $path, '.json' ),
-				'created' => $msg['time']['created'] ?? 0,
-			];
-		}
-		usort( $ordered, fn( $a, $b ) => $a['created'] <=> $b['created'] );
-
-		foreach ( $ordered as $m ) {
-			$partDir = $partRoot . '/' . $m['id'];
-			$files   = glob( $partDir . '/prt_*.json' ) ?: [];
-			sort( $files ); // ULID prefix gives time order
-			foreach ( $files as $pf ) {
-				$part = self::readJson( $pf );
-				if ( ! $part || ( $part['type'] ?? '' ) !== 'text' ) {
+		foreach ( self::sessionMessages( $id ) as $msg ) {
+			foreach ( self::messageParts( $msg['id'] ?? '' ) as $part ) {
+				if ( ( $part['type'] ?? '' ) !== 'text' ) {
 					continue;
 				}
 				$text = trim( $part['text'] ?? '' );
@@ -133,18 +156,11 @@ class OpenCodeSessions {
 	 * Reasoning tokens are billed as output, so they fold into `output`.
 	 */
 	public static function extractUsage( array $session ): ?array {
-		$id     = $session['id'] ?? '';
-		$msgDir = self::storageDir() . '/message/' . $id;
-		if ( ! is_dir( $msgDir ) ) {
-			return null;
-		}
-
 		$totals = [ 'input' => 0, 'output' => 0, 'cache_read' => 0, 'cache_creation' => 0 ];
 		$found  = false;
 
-		foreach ( glob( $msgDir . '/msg_*.json' ) ?: [] as $path ) {
-			$msg = self::readJson( $path );
-			if ( ! $msg || ( $msg['role'] ?? '' ) !== 'assistant' ) {
+		foreach ( self::sessionMessages( $session['id'] ?? '' ) as $msg ) {
+			if ( ( $msg['role'] ?? '' ) !== 'assistant' ) {
 				continue;
 			}
 			$t = $msg['tokens'] ?? null;
@@ -164,18 +180,49 @@ class OpenCodeSessions {
 	// ─── Listing ────────────────────────────────────────────────
 
 	public static function listSessions( ?string $project = null ): array {
-		$storage = self::storageDir();
-		if ( ! is_dir( $storage . '/session' ) ) {
-			return [];
+		$out  = [];
+		$seen = [];
+
+		// Primary: the SQLite database. Superset of the legacy tree once
+		// OpenCode's own migration has run.
+		$rows = self::dbRows(
+			'SELECT s.id, s.title, s.slug, s.project_id, s.time_created, s.time_updated,
+			        (SELECT COUNT(*) FROM message m WHERE m.session_id = s.id) AS messages,
+			        p.worktree, p.name AS project_label
+			   FROM session s LEFT JOIN project p ON p.id = s.project_id'
+		);
+		foreach ( $rows as $row ) {
+			$worktree = self::dbProjectPath( $row['project_id'] ?? '', $row['worktree'] ?? null );
+			$name     = self::dbProjectName( $row['project_id'] ?? '', $row['worktree'] ?? null, $row['project_label'] ?? null );
+
+			$seen[ $row['id'] ] = true;
+
+			if ( $project !== null && $project !== '' && $project !== $worktree ) {
+				continue;
+			}
+
+			$updatedMs = (int) ( $row['time_updated'] ?: $row['time_created'] );
+
+			$out[] = [
+				'id'          => $row['id'],
+				'display'     => $row['title'] ?: ( $row['slug'] ?? '' ),
+				'timestamp'   => $updatedMs,
+				'timestamp_s' => intval( $updatedMs / 1000 ),
+				'project'     => $worktree,
+				'projectName' => $name,
+				'size'        => (int) $row['messages'],
+				'created'     => (int) ( $row['time_created'] ?: $updatedMs ),
+				'slug'        => $row['slug'] ?? '',
+			];
 		}
 
+		// Union: legacy per-file sessions the db migration missed (or the
+		// whole tree on installs that never migrated).
+		$storage  = self::storageDir();
 		$projects = self::projects();
-		$files    = glob( $storage . '/session/*/ses_*.json' ) ?: [];
-		$out      = [];
-
-		foreach ( $files as $file ) {
+		foreach ( glob( $storage . '/session/*/ses_*.json' ) ?: [] as $file ) {
 			$ses = self::readJson( $file );
-			if ( ! $ses || empty( $ses['id'] ) ) {
+			if ( ! $ses || empty( $ses['id'] ) || isset( $seen[ $ses['id'] ] ) ) {
 				continue;
 			}
 
@@ -208,48 +255,30 @@ class OpenCodeSessions {
 		return $out;
 	}
 
+	/**
+	 * Aggregate projects from the session list so both backends (and the
+	 * union of them) stay consistent with what listSessions() reports.
+	 */
 	public static function listProjects(): array {
-		$storage = self::storageDir();
-		if ( ! is_dir( $storage . '/session' ) ) {
-			return [];
+		$agg = [];
+
+		foreach ( self::listSessions() as $s ) {
+			$key = $s['project'];
+			if ( ! isset( $agg[ $key ] ) ) {
+				$agg[ $key ] = [
+					'path'     => $s['project'],
+					'name'     => $s['projectName'],
+					'sessions' => 0,
+					'latest'   => 0,
+				];
+			}
+			$agg[ $key ]['sessions']++;
+			if ( $s['timestamp'] > $agg[ $key ]['latest'] ) {
+				$agg[ $key ]['latest'] = $s['timestamp'];
+			}
 		}
 
-		$projects    = self::projects();
-		$sessionDirs = glob( $storage . '/session/*', GLOB_ONLYDIR ) ?: [];
-		$out         = [];
-
-		foreach ( $sessionDirs as $dir ) {
-			$projectID = basename( $dir );
-			$files     = glob( $dir . '/ses_*.json' ) ?: [];
-			$count     = count( $files );
-			if ( $count === 0 ) {
-				continue;
-			}
-
-			$info     = $projects[ $projectID ] ?? null;
-			$worktree = self::projectPath( $projectID, $info );
-			$name     = self::projectName( $projectID, $info );
-
-			$latest = 0;
-			foreach ( $files as $f ) {
-				$ses = self::readJson( $f );
-				if ( ! $ses ) {
-					continue;
-				}
-				$ts = $ses['time']['updated'] ?? $ses['time']['created'] ?? 0;
-				if ( $ts > $latest ) {
-					$latest = $ts;
-				}
-			}
-
-			$out[] = [
-				'path'     => $worktree,
-				'name'     => $name,
-				'sessions' => $count,
-				'latest'   => (int) $latest,
-			];
-		}
-
+		$out = array_values( $agg );
 		usort( $out, fn( $a, $b ) => $b['latest'] <=> $a['latest'] );
 		return $out;
 	}
@@ -257,34 +286,18 @@ class OpenCodeSessions {
 	// ─── Conversation ───────────────────────────────────────────
 
 	public static function getConversation( string $sessionId ): array {
-		$file = self::findSessionFile( $sessionId );
-		if ( ! $file ) {
+		if ( ! self::hasSession( $sessionId ) ) {
 			return [];
 		}
 
-		$session = self::readJson( $file );
-		$msgDir  = self::storageDir() . '/message/' . $sessionId;
-		$events  = [];
-
-		// Gather messages with providerID/modelID off the first assistant message so we can emit init.
-		$messages = [];
-		foreach ( glob( $msgDir . '/msg_*.json' ) ?: [] as $path ) {
-			$msg = self::readJson( $path );
-			if ( ! $msg ) {
-				continue;
-			}
-			$messages[] = $msg;
-		}
-		usort(
-			$messages,
-			fn( $a, $b ) => ( $a['time']['created'] ?? 0 ) <=> ( $b['time']['created'] ?? 0 )
-		);
+		$messages = self::sessionMessages( $sessionId );
+		$events   = [];
 
 		$model = '';
 		foreach ( $messages as $m ) {
 			if ( ( $m['role'] ?? '' ) === 'assistant' ) {
-				$prov  = $m['model']['providerID'] ?? '';
-				$mid   = $m['model']['modelID']    ?? '';
+				$prov  = $m['providerID'] ?? $m['model']['providerID'] ?? '';
+				$mid   = $m['modelID']    ?? $m['model']['modelID']    ?? '';
 				$model = trim( "$prov $mid" );
 				break;
 			}
@@ -298,28 +311,19 @@ class OpenCodeSessions {
 			'_ts'        => 0,
 		];
 
-		if ( ! empty( $session['title'] ) ) {
+		$title = self::sessionTitle( $sessionId );
+		if ( $title !== '' ) {
 			$events[] = [
 				'type' => 'summary',
-				'text' => $session['title'],
+				'text' => $title,
 				'_ts'  => 0,
 			];
 		}
 
 		foreach ( $messages as $msg ) {
-			$role    = $msg['role']            ?? '';
-			$msgId   = $msg['id']              ?? '';
-			$msgTs   = $msg['time']['created'] ?? 0;
-			$partDir = self::storageDir() . '/part/' . $msgId;
-			$parts   = [];
-			foreach ( glob( $partDir . '/prt_*.json' ) ?: [] as $pf ) {
-				$p = self::readJson( $pf );
-				if ( $p ) {
-					$parts[] = $p;
-				}
-			}
-			sort( $parts ); // no-op for objects; use id-based sort below
-			usort( $parts, fn( $a, $b ) => strcmp( $a['id'] ?? '', $b['id'] ?? '' ) );
+			$role  = $msg['role']            ?? '';
+			$msgTs = $msg['time']['created'] ?? 0;
+			$parts = self::messageParts( $msg['id'] ?? '' );
 
 			foreach ( $parts as $i => $part ) {
 				$type = $part['type'] ?? '';
@@ -430,6 +434,170 @@ class OpenCodeSessions {
 		flush();
 	}
 
+	// ─── SQLite backend ─────────────────────────────────────────
+
+	private static ?SQLite3 $dbHandle  = null;
+	private static bool     $dbChecked = false;
+
+	private static function dbPath(): string {
+		return self::dataDir() . '/opencode.db';
+	}
+
+	/**
+	 * Read-only handle on opencode.db, or null when the db doesn't exist
+	 * (pre-SQLite installs) or isn't usable yet.
+	 */
+	private static function db(): ?SQLite3 {
+		if ( self::$dbChecked ) {
+			return self::$dbHandle;
+		}
+		self::$dbChecked = true;
+
+		$path = self::dbPath();
+		if ( ! is_readable( $path ) ) {
+			return null;
+		}
+
+		try {
+			$db = new SQLite3( $path, SQLITE3_OPEN_READONLY );
+			$db->busyTimeout( 2000 );
+			$ok = $db->querySingle( "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session'" );
+			self::$dbHandle = $ok ? $db : null;
+		} catch ( \Throwable $e ) {
+			self::$dbHandle = null;
+		}
+
+		return self::$dbHandle;
+	}
+
+	private static function dbRows( string $sql, array $params = [] ): array {
+		$db = self::db();
+		if ( ! $db ) {
+			return [];
+		}
+		$stmt = @$db->prepare( $sql );
+		if ( ! $stmt ) {
+			return [];
+		}
+		$i = 1;
+		foreach ( $params as $p ) {
+			$stmt->bindValue( $i++, $p );
+		}
+		$res = @$stmt->execute();
+		if ( ! $res ) {
+			return [];
+		}
+		$rows = [];
+		while ( $row = $res->fetchArray( SQLITE3_ASSOC ) ) {
+			$rows[] = $row;
+		}
+		return $rows;
+	}
+
+	/**
+	 * Messages for a session, oldest first, from the db when the session
+	 * lives there, else the legacy tree. Each entry is the decoded message
+	 * JSON with `id` guaranteed.
+	 */
+	private static function sessionMessages( string $sessionId ): array {
+		if ( $sessionId === '' ) {
+			return [];
+		}
+
+		$rows = self::dbRows(
+			'SELECT id, data FROM message WHERE session_id = ? ORDER BY time_created',
+			[ $sessionId ]
+		);
+		if ( $rows ) {
+			$out = [];
+			foreach ( $rows as $r ) {
+				$msg = json_decode( $r['data'], true );
+				if ( is_array( $msg ) ) {
+					$msg['id'] = $msg['id'] ?? $r['id'];
+					$out[]     = $msg;
+				}
+			}
+			return $out;
+		}
+
+		$msgDir = self::storageDir() . '/message/' . $sessionId;
+		$out    = [];
+		foreach ( glob( $msgDir . '/msg_*.json' ) ?: [] as $path ) {
+			$msg = self::readJson( $path );
+			if ( $msg ) {
+				$msg['id'] = $msg['id'] ?? basename( $path, '.json' );
+				$out[]     = $msg;
+			}
+		}
+		usort( $out, fn( $a, $b ) => ( $a['time']['created'] ?? 0 ) <=> ( $b['time']['created'] ?? 0 ) );
+		return $out;
+	}
+
+	/**
+	 * Parts for a message in intra-message order (prt_ ULIDs sort by time).
+	 */
+	private static function messageParts( string $messageId ): array {
+		if ( $messageId === '' ) {
+			return [];
+		}
+
+		$rows = self::dbRows(
+			'SELECT id, data FROM part WHERE message_id = ? ORDER BY id',
+			[ $messageId ]
+		);
+		if ( $rows ) {
+			$out = [];
+			foreach ( $rows as $r ) {
+				$p = json_decode( $r['data'], true );
+				if ( is_array( $p ) ) {
+					$out[] = $p;
+				}
+			}
+			return $out;
+		}
+
+		$files = glob( self::storageDir() . '/part/' . $messageId . '/prt_*.json' ) ?: [];
+		sort( $files );
+		$out = [];
+		foreach ( $files as $pf ) {
+			$p = self::readJson( $pf );
+			if ( $p ) {
+				$out[] = $p;
+			}
+		}
+		return $out;
+	}
+
+	private static function sessionTitle( string $sessionId ): string {
+		$rows = self::dbRows( 'SELECT title FROM session WHERE id = ?', [ $sessionId ] );
+		if ( $rows ) {
+			return (string) ( $rows[0]['title'] ?? '' );
+		}
+		$file = self::findLegacySessionFile( $sessionId );
+		if ( $file ) {
+			$ses = self::readJson( $file );
+			return (string) ( $ses['title'] ?? '' );
+		}
+		return '';
+	}
+
+	private static function dbProjectPath( string $projectID, ?string $worktree ): string {
+		if ( $projectID === 'global' || $worktree === '/' ) {
+			return '/';
+		}
+		return $worktree ?? '';
+	}
+
+	private static function dbProjectName( string $projectID, ?string $worktree, ?string $label ): string {
+		if ( $projectID === 'global' || $worktree === '/' ) {
+			return '(global)';
+		}
+		if ( $label ) {
+			return $label;
+		}
+		return $worktree ? basename( $worktree ) : substr( $projectID, 0, 8 );
+	}
+
 	// ─── Internals ──────────────────────────────────────────────
 
 	/**
@@ -454,7 +622,7 @@ class OpenCodeSessions {
 	}
 
 	/**
-	 * Load and cache every project file once per request.
+	 * Load and cache every legacy project file once per request.
 	 */
 	private static function projects(): array {
 		if ( self::$projectsCache !== null ) {

@@ -2,6 +2,16 @@
 
 All notable changes to Command Center are documented here.
 
+## [1.3.0] - 2026-07-10
+
+### Added
+
+- **OpenCode SQLite backend.** OpenCode migrated its persistence from per-entity JSON files (`storage/`) to a SQLite database (`opencode.db`); sessions created after that migration were invisible to Command Center. The provider now reads the database when it exists (sessions, messages, parts, projects, token usage) and unions in any legacy file-tree sessions the migration missed. Installs that never migrated fall back to the file tree unchanged.
+
+### Fixed
+
+- OpenCode model detection: `providerID`/`modelID` live at the top level of message records, not under a `model` key, so every OpenCode session replay reported its model as "opencode". Real models (e.g. `kimi-for-coding k2p6`) now show for both database and legacy sessions.
+
 ## [1.2.0] - 2026-07-10
 
 ### Added
