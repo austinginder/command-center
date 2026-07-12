@@ -1096,8 +1096,12 @@ function renderUsageView() {
             return;
         }
 
+        // Render at natural scale (no SVG stretching - a sparse chart scaled to
+        // fill the card turns 9px labels into headlines). Bands widen to fill
+        // the card when months are few, capped so a single month stays compact.
         const LEFT = 40, TOP = 6, BOTTOM = 18, RIGHT = 8;
-        const BAND = Math.max(40, Math.min(76, Math.round(640 / months.length)));
+        const avail = Math.max(320, (el.clientWidth || 900) - LEFT - RIGHT);
+        const BAND = Math.max(40, Math.min(130, Math.floor(avail / months.length)));
         const GAP = 2, PAD = Math.max(6, Math.round(BAND * 0.18));
         const barW = Math.min(24, Math.floor((BAND - PAD * 2 - GAP * (series.length - 1)) / series.length));
         const groupW = barW * series.length + GAP * (series.length - 1);
@@ -1133,7 +1137,7 @@ function renderUsageView() {
             svg += `</g>`;
         });
 
-        el.innerHTML = `<svg viewBox="0 0 ${width} ${height}" style="width:100%;min-width:${width}px;height:auto;display:block" role="img" aria-label="Monthly token usage">${svg}</svg>`;
+        el.innerHTML = `<svg viewBox="0 0 ${width} ${height}" style="width:${width}px;height:auto;display:block" role="img" aria-label="Monthly token usage">${svg}</svg>`;
         wireChartTooltip(el.querySelector('svg'), months, series);
     }
 
@@ -1208,7 +1212,9 @@ function renderUsageView() {
             output: a.output + m.output, cache_read: a.cache_read + m.cache_read,
         }), { sessions: 0, fresh: 0, output: 0, cache_read: 0 });
 
-        const range = months.length ? monthLabel(months[0].month, true) + ' - ' + monthLabel(months[months.length - 1].month, true) : '';
+        const first = months.length ? monthLabel(months[0].month, true) : '';
+        const last = months.length ? monthLabel(months[months.length - 1].month, true) : '';
+        const range = first === last ? first : first + ' - ' + last;
         document.getElementById('usage-kpis').innerHTML =
             kpiTile('Output tokens', formatTokens(tot.output), range) +
             kpiTile('Fresh input', formatTokens(tot.fresh), 'input + cache writes') +
