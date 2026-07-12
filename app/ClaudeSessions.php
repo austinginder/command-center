@@ -34,7 +34,9 @@ class ClaudeSessions {
 	}
 
 	/**
-	 * Fingerprint a session (mtime + size of the backing .jsonl file).
+	 * Fingerprint a session (mtime + size across the main .jsonl file and any
+	 * subagent transcripts). Folding subagent files in means the incremental
+	 * indexer notices subagent-only activity and re-extracts usage.
 	 */
 	public static function fingerprint( array $session ): ?array {
 		$file = self::findSessionFile( $session['id'] ?? '', $session['project'] ?? '' );
@@ -42,10 +44,44 @@ class ClaudeSessions {
 			return null;
 		}
 		clearstatcache( true, $file );
+		$mtime = (int) filemtime( $file );
+		$size  = (int) filesize( $file );
+
+		foreach ( self::subagentFiles( $file ) as $sub ) {
+			clearstatcache( true, $sub );
+			$mtime = max( $mtime, (int) filemtime( $sub ) );
+			$size += (int) filesize( $sub );
+		}
+
 		return [
-			'mtime' => (int) filemtime( $file ),
-			'size'  => (int) filesize( $file ),
+			'mtime' => $mtime,
+			'size'  => $size,
 		];
+	}
+
+	/**
+	 * List subagent transcript files for a session. Claude Code writes them
+	 * to a sibling directory named after the session id, e.g.
+	 * <project>/<session-id>/subagents/agent-*.jsonl (workflow agents nest
+	 * deeper under subagents/workflows/wf_xxx/), so scan it recursively.
+	 */
+	private static function subagentFiles( string $mainFile ): array {
+		$dir = dirname( $mainFile ) . '/' . basename( $mainFile, '.jsonl' );
+		if ( ! is_dir( $dir ) ) {
+			return [];
+		}
+
+		$files = [];
+		$it    = new RecursiveIteratorIterator(
+			new RecursiveDirectoryIterator( $dir, FilesystemIterator::SKIP_DOTS )
+		);
+		foreach ( $it as $f ) {
+			if ( $f->isFile() && substr( $f->getFilename(), -6 ) === '.jsonl' ) {
+				$files[] = $f->getPathname();
+			}
+		}
+		sort( $files );
+		return $files;
 	}
 
 	/**
@@ -120,11 +156,14 @@ class ClaudeSessions {
 	}
 
 	/**
-	 * Sum API token usage across the session's .jsonl file.
+	 * Sum API token usage across the session's .jsonl file plus all of its
+	 * subagent transcripts (Agent tool and workflow agents log usage to
+	 * separate files under <session-id>/, not the main transcript).
 	 *
 	 * Assistant events can repeat the same API response across multiple lines
 	 * (one per content block, streaming snapshots), so usage is deduped by
-	 * message id with last-write-wins before summing.
+	 * message id with last-write-wins before summing. The dedup map is shared
+	 * across files so a response echoed in two transcripts counts once.
 	 */
 	public static function extractUsage( array $session ): ?array {
 		$file = self::findSessionFile( $session['id'] ?? '', $session['project'] ?? '' );
@@ -132,14 +171,41 @@ class ClaudeSessions {
 			return null;
 		}
 
-		$fp = fopen( $file, 'r' );
-		if ( ! $fp ) {
-			return null;
-		}
-
 		$perMsg = [];
 		$anon   = [ 'input' => 0, 'output' => 0, 'cache_read' => 0, 'cache_creation' => 0 ];
 		$found  = false;
+
+		foreach ( array_merge( [ $file ], self::subagentFiles( $file ) ) as $path ) {
+			if ( self::sumUsageFile( $path, $perMsg, $anon ) ) {
+				$found = true;
+			}
+		}
+
+		if ( ! $found ) {
+			return null;
+		}
+
+		$totals = $anon;
+		foreach ( $perMsg as $usage ) {
+			foreach ( $usage as $k => $v ) {
+				$totals[ $k ] += $v;
+			}
+		}
+
+		return $totals;
+	}
+
+	/**
+	 * Accumulate one transcript file's usage into the shared dedup map.
+	 * Returns true when the file contributed any usage data.
+	 */
+	private static function sumUsageFile( string $file, array &$perMsg, array &$anon ): bool {
+		$fp = fopen( $file, 'r' );
+		if ( ! $fp ) {
+			return false;
+		}
+
+		$found = false;
 
 		while ( ( $line = fgets( $fp ) ) !== false ) {
 			if ( strpos( $line, '"usage"' ) === false ) {
@@ -172,18 +238,7 @@ class ClaudeSessions {
 
 		fclose( $fp );
 
-		if ( ! $found ) {
-			return null;
-		}
-
-		$totals = $anon;
-		foreach ( $perMsg as $usage ) {
-			foreach ( $usage as $k => $v ) {
-				$totals[ $k ] += $v;
-			}
-		}
-
-		return $totals;
+		return $found;
 	}
 
 	// ─── Sessions ───────────────────────────────────────────────
