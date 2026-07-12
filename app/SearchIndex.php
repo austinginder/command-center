@@ -371,6 +371,55 @@ class SearchIndex {
 	}
 
 	/**
+	 * Per-month session counts + token totals, broken out by source so the
+	 * usage view can filter client-side. Months come from the session
+	 * timestamp, so a session straddling a month boundary lands entirely in
+	 * the month of its last prompt.
+	 *
+	 * @return array [{month:'YYYY-MM', source, sessions, tokens_input,
+	 *                 tokens_output, tokens_cache_read, tokens_cache_creation}]
+	 */
+	public static function statsMonthly( ?string $project = null ): array {
+		$db = self::db();
+
+		$sql = "
+			SELECT strftime('%Y-%m', timestamp_ms / 1000, 'unixepoch', 'localtime') AS month,
+			       source,
+			       COUNT(*) AS sessions,
+			       SUM(COALESCE(tokens_input, 0)) AS tokens_input,
+			       SUM(COALESCE(tokens_output, 0)) AS tokens_output,
+			       SUM(COALESCE(tokens_cache_read, 0)) AS tokens_cache_read,
+			       SUM(COALESCE(tokens_cache_creation, 0)) AS tokens_cache_creation
+			FROM session_files
+			WHERE timestamp_ms > 0
+		";
+		if ( $project ) {
+			$sql .= ' AND project = :project';
+		}
+		$sql .= ' GROUP BY month, source ORDER BY month, source';
+
+		$stmt = $db->prepare( $sql );
+		if ( $project ) {
+			$stmt->bindValue( ':project', $project, SQLITE3_TEXT );
+		}
+
+		$result = $stmt->execute();
+		$rows   = [];
+		while ( $row = $result->fetchArray( SQLITE3_ASSOC ) ) {
+			$rows[] = [
+				'month'                 => $row['month'],
+				'source'                => $row['source'],
+				'sessions'              => (int) $row['sessions'],
+				'tokens_input'          => (int) $row['tokens_input'],
+				'tokens_output'         => (int) $row['tokens_output'],
+				'tokens_cache_read'     => (int) $row['tokens_cache_read'],
+				'tokens_cache_creation' => (int) $row['tokens_cache_creation'],
+			];
+		}
+		return $rows;
+	}
+
+	/**
 	 * Compute token usage for already-indexed rows that predate the usage
 	 * columns (tokens_output IS NULL). Providers that track nothing get 0s so
 	 * each row is only visited once. Batched - call repeatedly until

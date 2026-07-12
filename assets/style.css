@@ -151,6 +151,29 @@ details.tool-group[open] > summary .tool-group-label::before { content: '▾ '; 
 #heatmap-tooltip .hm-tip-value { font-weight: 700; }
 #heatmap-tooltip .hm-tip-sub { color: #9aa59e; }
 
+/* ─── Usage Charts ─────────────────────────────────────────── */
+/* Series colors validated for both surfaces (dataviz six-checks):
+   light #3b82f6/#10b981/#8b5cf6 on #ffffff, dark swaps emerald to
+   #059669 to stay inside the dark lightness band. */
+.uz-in   { fill: #3b82f6; }
+.uz-out  { fill: #10b981; }
+.uz-cr   { fill: #8b5cf6; }
+.dark .uz-out { fill: #059669; }
+.uz-bar  { transition: opacity 0.1s; }
+.uz-hit:hover ~ .uz-bar, .uz-group:hover .uz-bar { opacity: 0.8; }
+.uz-grid { stroke: #f4f4f5; stroke-width: 1; }
+.dark .uz-grid { stroke: #1a231e; }
+.uz-axis { stroke: #e4e4e7; stroke-width: 1; }
+.dark .uz-axis { stroke: #24312a; }
+.uz-label { fill: #a1a1aa; font-size: 9px; font-family: 'JetBrains Mono', monospace; }
+.dark .uz-label { fill: #5c665f; }
+.uz-hit  { fill: transparent; cursor: default; }
+/* Tooltip line-keys (tooltip surface is always dark). */
+.uz-key { display: inline-block; width: 10px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+.uz-key-in  { background: #3b82f6; }
+.uz-key-out { background: #10b981; }
+.uz-key-cr  { background: #8b5cf6; }
+
 /* ─── Focus Rings ──────────────────────────────────────────── */
 input:focus, select:focus {
     outline: none;

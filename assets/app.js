@@ -6,6 +6,7 @@ const state = {
 // ─── Router ──────────────────────────────────────────────────
 const routes = [
     { pattern: /^\/$/, view: renderDashboard },
+    { pattern: /^\/usage$/, view: renderUsageView },
     { pattern: /^\/sessions$/, view: () => navigate('/', true) },
     { pattern: /^\/sessions\/([A-Za-z0-9_-]+)$/, view: renderSessionView },
 ];
@@ -70,6 +71,7 @@ function formatBytes(bytes) {
 }
 
 function formatTokens(n) {
+    if (n >= 1000000000) return (n / 1000000000).toFixed(1) + 'B';
     if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
     if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
     return String(n);
@@ -1003,6 +1005,302 @@ function renderDashboard() {
         loadDailyStats();
         searchInput.focus();
         if (initialQuery && initialDeep) doDeepSearch();
+    })();
+}
+
+// ─── View: Token Usage ───────────────────────────────────────
+// Monthly token breakdown across providers. Fresh input (input + cache
+// creation) and output share one chart; cache reads get their own - they
+// run ~20x larger and would flatten everything else on a shared axis.
+function renderUsageView() {
+    const app = document.getElementById('app');
+    app.innerHTML = `
+        <div class="space-y-4">
+            <div class="flex flex-wrap items-center gap-2">
+                <h1 class="text-sm font-mono font-bold tracking-[0.2em] text-zinc-900 dark:text-cc-bright mr-2">TOKEN USAGE</h1>
+                <div id="usage-pills" class="flex flex-wrap items-center gap-1.5"></div>
+            </div>
+            <div id="usage-kpis" class="grid grid-cols-2 sm:grid-cols-4 gap-3"></div>
+            <div class="bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm px-4 pt-3.5 pb-2">
+                <div class="flex flex-wrap items-baseline justify-between gap-2">
+                    <span class="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-cc-dim">Tokens per month</span>
+                    <span class="flex items-center gap-4 text-[11px] font-mono text-zinc-500 dark:text-cc-mut">
+                        <span class="flex items-center gap-1.5"><svg width="10" height="10"><rect class="uz-in" width="10" height="10" rx="2"/></svg>fresh input</span>
+                        <span class="flex items-center gap-1.5"><svg width="10" height="10"><rect class="uz-out" width="10" height="10" rx="2"/></svg>output</span>
+                    </span>
+                </div>
+                <div id="usage-chart-main" class="overflow-x-auto mt-2"></div>
+            </div>
+            <div class="bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm px-4 pt-3.5 pb-2">
+                <span class="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-cc-dim">Cache reads per month</span>
+                <div id="usage-chart-cache" class="overflow-x-auto mt-2"></div>
+            </div>
+            <div id="usage-table" class="bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm overflow-hidden"></div>
+        </div>
+    `;
+
+    let rows = [];        // raw per-(month,source) rows from the API
+    let sources = [];     // [{id,label}]
+    let activeSource = new URLSearchParams(location.search).get('source') || '';
+
+    const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    function monthLabel(key, withYear) {
+        const [y, m] = key.split('-').map(Number);
+        return MONTH_NAMES[m - 1] + (withYear ? ' ’' + String(y).slice(2) : '');
+    }
+    function monthLongLabel(key) {
+        const [y, m] = key.split('-').map(Number);
+        return new Date(y, m - 1, 1).toLocaleDateString([], { month: 'long', year: 'numeric' });
+    }
+
+    // Aggregate the filtered rows into ordered per-month totals.
+    function monthTotals() {
+        const byMonth = {};
+        rows.forEach(r => {
+            if (activeSource && r.source !== activeSource) return;
+            const t = byMonth[r.month] || (byMonth[r.month] = { sessions: 0, input: 0, output: 0, cache_read: 0, cache_creation: 0 });
+            t.sessions += r.sessions;
+            t.input += r.tokens_input;
+            t.output += r.tokens_output;
+            t.cache_read += r.tokens_cache_read;
+            t.cache_creation += r.tokens_cache_creation;
+        });
+        return Object.keys(byMonth).sort().map(month => ({ month, ...byMonth[month], fresh: byMonth[month].input + byMonth[month].cache_creation }));
+    }
+
+    // Clean axis ticks: step is 1/2/5 x 10^k, ~4 gridlines.
+    function niceTicks(max) {
+        if (max <= 0) return { top: 1, ticks: [0, 1] };
+        const rough = max / 4;
+        const pow = Math.pow(10, Math.floor(Math.log10(rough)));
+        const step = [1, 2, 5, 10].map(m => m * pow).find(s => s >= rough);
+        const top = Math.ceil(max / step) * step;
+        const ticks = [];
+        for (let v = 0; v <= top; v += step) ticks.push(v);
+        return { top, ticks };
+    }
+
+    // Column with a 4px rounded data-end and a square baseline.
+    function barPath(x, y, w, h, baseY) {
+        if (h <= 0) return '';
+        const r = Math.min(4, w / 2, h);
+        return `M${x},${baseY} L${x},${y + r} Q${x},${y} ${x + r},${y} L${x + w - r},${y} Q${x + w},${y} ${x + w},${y + r} L${x + w},${baseY} Z`;
+    }
+
+    // Shared column-chart renderer. series: [{key, cls, label}] pulls values
+    // off each month row; one transparent hit band per month drives the tooltip.
+    function drawChart(el, months, series, height) {
+        if (!el) return;
+        if (!months.length || !months.some(m => series.some(s => m[s.key] > 0))) {
+            el.innerHTML = `<div class="py-8 text-center text-xs font-mono text-zinc-400 dark:text-cc-dim">no token data indexed</div>`;
+            return;
+        }
+
+        const LEFT = 40, TOP = 6, BOTTOM = 18, RIGHT = 8;
+        const BAND = Math.max(40, Math.min(76, Math.round(640 / months.length)));
+        const GAP = 2, PAD = Math.max(6, Math.round(BAND * 0.18));
+        const barW = Math.min(24, Math.floor((BAND - PAD * 2 - GAP * (series.length - 1)) / series.length));
+        const groupW = barW * series.length + GAP * (series.length - 1);
+        const plotH = height - TOP - BOTTOM;
+        const baseY = TOP + plotH;
+        const width = LEFT + months.length * BAND + RIGHT;
+
+        const max = Math.max(...months.map(m => Math.max(...series.map(s => m[s.key]))));
+        const { top, ticks } = niceTicks(max);
+        const yOf = v => baseY - (v / top) * plotH;
+
+        let svg = '';
+        ticks.forEach(v => {
+            if (v > 0) svg += `<line class="uz-grid" x1="${LEFT}" y1="${yOf(v)}" x2="${width - RIGHT}" y2="${yOf(v)}"/>`;
+            svg += `<text class="uz-label" x="${LEFT - 6}" y="${yOf(v) + 3}" text-anchor="end">${formatTokens(v)}</text>`;
+        });
+        svg += `<line class="uz-axis" x1="${LEFT}" y1="${baseY}" x2="${width - RIGHT}" y2="${baseY}"/>`;
+
+        let prevYear = '';
+        months.forEach((m, i) => {
+            const x0 = LEFT + i * BAND;
+            const gx = x0 + (BAND - groupW) / 2;
+            const year = m.month.split('-')[0];
+            const withYear = year !== prevYear;
+            prevYear = year;
+
+            svg += `<g class="uz-group" data-idx="${i}">`;
+            svg += `<rect class="uz-hit" x="${x0}" y="${TOP}" width="${BAND}" height="${plotH + BOTTOM}"/>`;
+            series.forEach((s, si) => {
+                svg += `<path class="uz-bar ${s.cls}" d="${barPath(gx + si * (barW + GAP), yOf(m[s.key]), barW, baseY - yOf(m[s.key]), baseY)}"/>`;
+            });
+            svg += `<text class="uz-label" x="${x0 + BAND / 2}" y="${baseY + 13}" text-anchor="middle">${monthLabel(m.month, withYear)}</text>`;
+            svg += `</g>`;
+        });
+
+        el.innerHTML = `<svg viewBox="0 0 ${width} ${height}" style="width:100%;min-width:${width}px;height:auto;display:block" role="img" aria-label="Monthly token usage">${svg}</svg>`;
+        wireChartTooltip(el.querySelector('svg'), months, series);
+    }
+
+    // Per-band hover tooltip: every series' value at that month, values lead.
+    function wireChartTooltip(svg, months, series) {
+        function getTip() {
+            let tip = document.getElementById('heatmap-tooltip');
+            if (!tip) {
+                tip = document.createElement('div');
+                tip.id = 'heatmap-tooltip';
+                tip.style.display = 'none';
+                document.getElementById('app').appendChild(tip);
+            }
+            return tip;
+        }
+
+        svg.addEventListener('pointermove', e => {
+            const group = e.target.closest('.uz-group');
+            const tip = getTip();
+            if (!group) { tip.style.display = 'none'; return; }
+            const m = months[parseInt(group.dataset.idx, 10)];
+
+            tip.textContent = '';
+            const title = document.createElement('div');
+            title.className = 'hm-tip-value';
+            title.textContent = monthLongLabel(m.month);
+            tip.appendChild(title);
+
+            series.forEach(s => {
+                const row = document.createElement('div');
+                const key = document.createElement('span');
+                key.className = 'uz-key uz-key-' + s.keyCls;
+                const val = document.createElement('strong');
+                val.textContent = formatTokens(m[s.key]);
+                const lbl = document.createElement('span');
+                lbl.className = 'hm-tip-sub';
+                lbl.textContent = ' ' + s.label;
+                row.appendChild(key);
+                row.appendChild(val);
+                row.appendChild(lbl);
+                tip.appendChild(row);
+            });
+
+            tip.style.display = 'block';
+            const tw = tip.offsetWidth, th = tip.offsetHeight;
+            let x = e.clientX + 12, yPos = e.clientY - th - 10;
+            if (x + tw > window.innerWidth - 8) x = e.clientX - tw - 12;
+            if (yPos < 8) yPos = e.clientY + 14;
+            tip.style.left = x + 'px';
+            tip.style.top = yPos + 'px';
+        });
+
+        svg.addEventListener('pointerleave', () => {
+            const tip = document.getElementById('heatmap-tooltip');
+            if (tip) tip.style.display = 'none';
+        });
+    }
+
+    function kpiTile(label, value, sub) {
+        return `<div class="bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm px-4 py-3">
+            <div class="text-[11px] font-mono text-zinc-400 dark:text-cc-dim">${esc(label)}</div>
+            <div class="mt-0.5 text-xl font-semibold text-zinc-900 dark:text-cc-bright">${esc(value)}</div>
+            ${sub ? `<div class="text-[11px] font-mono text-zinc-400 dark:text-cc-dim">${esc(sub)}</div>` : ''}
+        </div>`;
+    }
+
+    function renderAll() {
+        const months = monthTotals();
+
+        const tot = months.reduce((a, m) => ({
+            sessions: a.sessions + m.sessions, fresh: a.fresh + m.fresh,
+            output: a.output + m.output, cache_read: a.cache_read + m.cache_read,
+        }), { sessions: 0, fresh: 0, output: 0, cache_read: 0 });
+
+        const range = months.length ? monthLabel(months[0].month, true) + ' - ' + monthLabel(months[months.length - 1].month, true) : '';
+        document.getElementById('usage-kpis').innerHTML =
+            kpiTile('Output tokens', formatTokens(tot.output), range) +
+            kpiTile('Fresh input', formatTokens(tot.fresh), 'input + cache writes') +
+            kpiTile('Cache reads', formatTokens(tot.cache_read), '') +
+            kpiTile('Sessions', tot.sessions.toLocaleString(), '');
+
+        drawChart(document.getElementById('usage-chart-main'), months, [
+            { key: 'fresh', cls: 'uz-in', keyCls: 'in', label: 'fresh input' },
+            { key: 'output', cls: 'uz-out', keyCls: 'out', label: 'output' },
+        ], 190);
+
+        drawChart(document.getElementById('usage-chart-cache'), months, [
+            { key: 'cache_read', cls: 'uz-cr', keyCls: 'cr', label: 'cache reads' },
+        ], 120);
+
+        renderTable(months);
+        renderUsagePills();
+    }
+
+    function renderTable(months) {
+        const el = document.getElementById('usage-table');
+        if (!el) return;
+        if (!months.length) {
+            el.innerHTML = emptyState(illoRadar(), 'no usage indexed', 'token data appears after sessions are indexed');
+            return;
+        }
+
+        const num = n => n ? n.toLocaleString() : '<span class="text-zinc-300 dark:text-cc-line3">0</span>';
+        const th = (label, right = true) => `<th class="px-4 py-2 text-[11px] font-mono font-medium uppercase tracking-wider text-zinc-400 dark:text-cc-dim ${right ? 'text-right' : 'text-left'}">${label}</th>`;
+
+        let html = `<div class="overflow-x-auto"><table class="w-full text-xs font-mono" style="font-variant-numeric: tabular-nums">
+            <thead><tr class="border-b border-zinc-100 dark:border-cc-line2">
+                ${th('Month', false)}${th('Sessions')}${th('Input')}${th('Cache writes')}${th('Cache reads')}${th('Output')}
+            </tr></thead><tbody>`;
+
+        [...months].reverse().forEach(m => {
+            html += `<tr class="border-t border-zinc-100 dark:border-cc-line2 hover:bg-zinc-50 dark:hover:bg-cc-panel">
+                <td class="px-4 py-2 text-zinc-800 dark:text-cc-ink whitespace-nowrap">${esc(monthLongLabel(m.month))}</td>
+                <td class="px-4 py-2 text-right text-zinc-500 dark:text-cc-mut">${num(m.sessions)}</td>
+                <td class="px-4 py-2 text-right text-zinc-500 dark:text-cc-mut">${num(m.input)}</td>
+                <td class="px-4 py-2 text-right text-zinc-500 dark:text-cc-mut">${num(m.cache_creation)}</td>
+                <td class="px-4 py-2 text-right text-zinc-500 dark:text-cc-mut">${num(m.cache_read)}</td>
+                <td class="px-4 py-2 text-right text-zinc-800 dark:text-cc-ink">${num(m.output)}</td>
+            </tr>`;
+        });
+
+        html += '</tbody></table></div>';
+        el.innerHTML = html;
+    }
+
+    function renderUsagePills() {
+        const el = document.getElementById('usage-pills');
+        if (!el) return;
+
+        // Only offer sources that actually carry token data.
+        const withTokens = new Set();
+        rows.forEach(r => {
+            if (r.tokens_input + r.tokens_output + r.tokens_cache_read + r.tokens_cache_creation > 0) withTokens.add(r.source);
+        });
+
+        const pill = (id, label) => {
+            const active = activeSource === id;
+            const base = active
+                ? 'border-zinc-900 dark:border-cc-ink bg-zinc-900 text-white dark:bg-cc-ink dark:text-cc-bg'
+                : 'border-zinc-200 dark:border-cc-line bg-white dark:bg-cc-card text-zinc-600 dark:text-cc-mut hover:border-zinc-400 dark:hover:border-[#2a3830]';
+            const dot = id ? `<span class="w-1.5 h-1.5 rounded-full ${SOURCE_DOTS[id] || 'bg-zinc-400'}"></span>` : '';
+            return `<button data-source="${esc(id)}" class="usage-pill inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition-colors ${base}">${dot}<span>${esc(label)}</span></button>`;
+        };
+
+        let html = pill('', 'All');
+        sources.forEach(s => { if (withTokens.has(s.id)) html += pill(s.id, s.label); });
+        el.innerHTML = html;
+
+        el.querySelectorAll('.usage-pill').forEach(btn => {
+            btn.addEventListener('click', () => {
+                activeSource = btn.dataset.source;
+                history.replaceState(null, '', '/usage' + (activeSource ? '?source=' + encodeURIComponent(activeSource) : ''));
+                renderAll();
+            });
+        });
+    }
+
+    (async () => {
+        try {
+            [rows, sources] = await Promise.all([
+                fetch('/api/sessions/stats/monthly').then(r => r.json()),
+                fetch('/api/sessions/sources').then(r => r.json()),
+            ]);
+        } catch (err) {
+            rows = []; sources = [];
+        }
+        renderAll();
     })();
 }
 

@@ -81,6 +81,7 @@
             </span>
         </a>
         <div class="flex items-center gap-3">
+            <a href="/usage" data-route id="nav-usage" class="text-xs font-mono text-zinc-400 dark:text-cc-dim hover:text-zinc-600 dark:hover:text-cc-mut transition-colors">USAGE</a>
             <span id="index-status" class="hidden sm:inline text-xs font-mono text-zinc-400 dark:text-cc-dim"></span>
             <button id="dark-toggle" type="button" class="text-zinc-400 dark:text-cc-dim hover:text-zinc-600 dark:hover:text-cc-mut p-1 rounded transition-colors" title="Toggle dark mode">
                 <svg id="icon-moon" class="w-3.5 h-3.5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>

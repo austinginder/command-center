@@ -2,6 +2,18 @@
 
 All notable changes to Command Center are documented here.
 
+## [1.4.0] - 2026-07-11
+
+### Added
+
+- **Usage page** (`/usage`, linked from the nav): monthly token breakdown across providers. KPI tiles for output, fresh input, cache reads, and sessions; a per-month column chart of fresh input vs output; a separate cache-reads chart (they run ~20x larger and would flatten everything else on a shared axis); and a full per-month table of input, cache writes, cache reads, and output. Filterable by provider.
+- `GET /api/sessions/stats/monthly` - per-month token totals broken out by source.
+- Token formatting gains a billions tier (`59.2B` instead of `59187.2M`).
+
+### Fixed
+
+- **Claude Code token totals now include subagent transcripts.** Usage logged by Agent tool and workflow subagents to `<session-id>/subagents/` files was invisible to the index - roughly 40% of output tokens on agent-heavy months. Usage now sums across the main transcript plus all nested subagent transcripts (deduped by message id), and the session fingerprint folds subagent files in so subagent-only activity triggers re-extraction on the next reindex.
+
 ## [1.3.0] - 2026-07-10
 
 ### Added

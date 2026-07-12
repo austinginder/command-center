@@ -61,6 +61,14 @@ if ( $method === 'GET' && $path === '/sessions/stats/daily' ) {
 	exit;
 }
 
+// GET /api/sessions/stats/monthly - per-month token totals by source (usage view)
+if ( $method === 'GET' && $path === '/sessions/stats/monthly' ) {
+	require_once BASE_DIR . '/app/SearchIndex.php';
+	$project = $_GET['project'] ?? null;
+	echo json_encode( SearchIndex::statsMonthly( $project ?: null ) );
+	exit;
+}
+
 // POST /api/sessions/tokens/backfill - compute token usage for rows indexed before the usage columns existed
 if ( $method === 'POST' && $path === '/sessions/tokens/backfill' ) {
 	set_time_limit( 600 );
