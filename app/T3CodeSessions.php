@@ -92,6 +92,47 @@ class T3CodeSessions {
 	 * Extract searchable text for FTS. Concatenates thread title,
 	 * all message bodies, and every activity summary.
 	 */
+	/**
+	 * Estimated token usage - T3 Code's SQLite stores only role + text per
+	 * message, no usage. Same estimation model as Command Code: ~4 chars per
+	 * token; output from assistant text, input from all distinct text,
+	 * cache_read from cumulative context replay per assistant turn.
+	 */
+	public static function extractUsage( array $session ): ?array {
+		$db = self::db();
+		if ( ! $db ) {
+			return null;
+		}
+
+		$stmt = $db->prepare( 'SELECT role, text FROM projection_thread_messages WHERE thread_id = :id ORDER BY created_at' );
+		$stmt->bindValue( ':id', $session['id'] ?? '', SQLITE3_TEXT );
+		$res = $stmt->execute();
+
+		$total    = 0;
+		$outChars = 0;
+		$ctxChars = 0;
+
+		while ( $row = $res->fetchArray( SQLITE3_ASSOC ) ) {
+			$chars = strlen( $row['text'] ?? '' );
+			if ( ( $row['role'] ?? '' ) === 'assistant' ) {
+				$outChars += $chars;
+				$ctxChars += $total;
+			}
+			$total += $chars;
+		}
+
+		if ( $total === 0 ) {
+			return null;
+		}
+
+		return [
+			'input'          => intdiv( $total, 4 ),
+			'output'         => intdiv( $outChars, 4 ),
+			'cache_read'     => intdiv( $ctxChars, 4 ),
+			'cache_creation' => 0,
+		];
+	}
+
 	public static function extractSessionText( array $session ): string {
 		$db = self::db();
 		if ( ! $db ) {

@@ -42,6 +42,69 @@ class CommandCodeSessions {
 		];
 	}
 
+	/**
+	 * Estimated token usage - Command Code transcripts carry no usage data
+	 * (and its internal billing API only exposes the current billing period),
+	 * so this derives estimates from message text at ~4 chars per token:
+	 * output from assistant messages, input from all distinct content, and
+	 * cache_read from replaying the conversation cumulatively (each assistant
+	 * turn reprocesses everything before it). System prompts, tool schemas,
+	 * and tokenizer differences are invisible, so expect these to run low.
+	 */
+	public static function extractUsage( array $session ): ?array {
+		$file = self::findSessionFile( $session['id'] ?? '', $session['project'] ?? '' );
+		if ( ! $file || ! file_exists( $file ) ) {
+			return null;
+		}
+
+		$fp = fopen( $file, 'r' );
+		if ( ! $fp ) {
+			return null;
+		}
+
+		$total    = 0;
+		$outChars = 0;
+		$ctxChars = 0;
+
+		while ( ( $line = fgets( $fp ) ) !== false ) {
+			$obj = json_decode( trim( $line ), true );
+			if ( ! $obj || ! isset( $obj['role'] ) ) {
+				continue;
+			}
+
+			$content = $obj['content'] ?? '';
+			$chars   = 0;
+			if ( is_string( $content ) ) {
+				$chars = strlen( $content );
+			} elseif ( is_array( $content ) ) {
+				foreach ( $content as $block ) {
+					$chars += is_array( $block ) && isset( $block['text'] ) && is_string( $block['text'] )
+						? strlen( $block['text'] )
+						: strlen( json_encode( $block ) );
+				}
+			}
+
+			if ( $obj['role'] === 'assistant' ) {
+				$outChars += $chars;
+				$ctxChars += $total; // context reprocessed by this turn
+			}
+			$total += $chars;
+		}
+
+		fclose( $fp );
+
+		if ( $total === 0 ) {
+			return null;
+		}
+
+		return [
+			'input'          => intdiv( $total, 4 ),
+			'output'         => intdiv( $outChars, 4 ),
+			'cache_read'     => intdiv( $ctxChars, 4 ),
+			'cache_creation' => 0,
+		];
+	}
+
 	public static function extractSessionText( array $session ): string {
 		$file = self::findSessionFile( $session['id'] ?? '', $session['project'] ?? '' );
 		if ( ! $file || ! file_exists( $file ) ) {

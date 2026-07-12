@@ -1020,6 +1020,7 @@ function renderUsageView() {
                 <h1 class="text-sm font-mono font-bold tracking-[0.2em] text-zinc-900 dark:text-cc-bright mr-2">TOKEN USAGE</h1>
                 <div id="usage-pills" class="flex flex-wrap items-center gap-1.5"></div>
             </div>
+            <div id="usage-note" class="hidden text-[11px] font-mono text-zinc-400 dark:text-cc-dim"></div>
             <div id="usage-kpis" class="grid grid-cols-2 sm:grid-cols-4 gap-3"></div>
             <div class="bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm px-4 pt-3.5 pb-2">
                 <div class="flex flex-wrap items-baseline justify-between gap-2">
@@ -1053,11 +1054,23 @@ function renderUsageView() {
         return new Date(y, m - 1, 1).toLocaleDateString([], { month: 'long', year: 'numeric' });
     }
 
+    // Provider ids whose numbers are estimates (chars/4 heuristics, Grok's
+    // context meter). Shown per-provider with a ~, excluded from All rollups
+    // so measured totals stay real.
+    function estimatedSet() {
+        return new Set(sources.filter(s => s.usage === 'estimated').map(s => s.id));
+    }
+    function isEstimatedView() {
+        return activeSource && estimatedSet().has(activeSource);
+    }
+
     // Aggregate the filtered rows into ordered per-month totals.
     function monthTotals() {
+        const est = estimatedSet();
         const byMonth = {};
         rows.forEach(r => {
             if (activeSource && r.source !== activeSource) return;
+            if (!activeSource && est.has(r.source)) return;
             const t = byMonth[r.month] || (byMonth[r.month] = { sessions: 0, input: 0, output: 0, cache_read: 0, cache_creation: 0 });
             t.sessions += r.sessions;
             t.input += r.tokens_input;
@@ -1089,7 +1102,7 @@ function renderUsageView() {
 
     // Shared column-chart renderer. series: [{key, cls, label}] pulls values
     // off each month row; one transparent hit band per month drives the tooltip.
-    function drawChart(el, months, series, height) {
+    function drawChart(el, months, series, height, approx = false) {
         if (!el) return;
         if (!months.length || !months.some(m => series.some(s => m[s.key] > 0))) {
             el.innerHTML = `<div class="py-8 text-center text-xs font-mono text-zinc-400 dark:text-cc-dim">no token data indexed</div>`;
@@ -1138,11 +1151,11 @@ function renderUsageView() {
         });
 
         el.innerHTML = `<svg viewBox="0 0 ${width} ${height}" style="width:${width}px;height:auto;display:block" role="img" aria-label="Monthly token usage">${svg}</svg>`;
-        wireChartTooltip(el.querySelector('svg'), months, series);
+        wireChartTooltip(el.querySelector('svg'), months, series, approx);
     }
 
     // Per-band hover tooltip: every series' value at that month, values lead.
-    function wireChartTooltip(svg, months, series) {
+    function wireChartTooltip(svg, months, series, approx = false) {
         function getTip() {
             let tip = document.getElementById('heatmap-tooltip');
             if (!tip) {
@@ -1171,7 +1184,7 @@ function renderUsageView() {
                 const key = document.createElement('span');
                 key.className = 'uz-key uz-key-' + s.keyCls;
                 const val = document.createElement('strong');
-                val.textContent = formatTokens(m[s.key]);
+                val.textContent = (approx ? '~' : '') + formatTokens(m[s.key]);
                 const lbl = document.createElement('span');
                 lbl.className = 'hm-tip-sub';
                 lbl.textContent = ' ' + s.label;
@@ -1206,6 +1219,23 @@ function renderUsageView() {
 
     function renderAll() {
         const months = monthTotals();
+        const approx = isEstimatedView();
+        const tilde = approx ? '~' : '';
+
+        // Estimated-provider view gets a methodology note; the All view notes
+        // which providers its totals leave out (only ones with data).
+        const note = document.getElementById('usage-note');
+        const est = estimatedSet();
+        if (approx) {
+            note.textContent = activeSource === 'grok'
+                ? 'Estimated - context tokens come from Grok’s own counter; output is estimated from streamed text at ~4 chars per token.'
+                : 'Estimated from raw transcripts at ~4 chars per token. System prompts and tool schemas are invisible, so real usage runs higher.';
+            note.classList.remove('hidden');
+        } else {
+            const withData = sources.filter(s => est.has(s.id) && rows.some(r => r.source === s.id)).map(s => s.label);
+            note.textContent = withData.length ? 'Measured providers only - estimated usage for ' + withData.join(', ') + ' is shown in their own views.' : '';
+            note.classList.toggle('hidden', !withData.length);
+        }
 
         const tot = months.reduce((a, m) => ({
             sessions: a.sessions + m.sessions, fresh: a.fresh + m.fresh,
@@ -1216,25 +1246,25 @@ function renderUsageView() {
         const last = months.length ? monthLabel(months[months.length - 1].month, true) : '';
         const range = first === last ? first : first + ' - ' + last;
         document.getElementById('usage-kpis').innerHTML =
-            kpiTile('Output tokens', formatTokens(tot.output), range) +
-            kpiTile('Fresh input', formatTokens(tot.fresh), 'input + cache writes') +
-            kpiTile('Cache reads', formatTokens(tot.cache_read), '') +
+            kpiTile('Output tokens', tilde + formatTokens(tot.output), range) +
+            kpiTile('Fresh input', tilde + formatTokens(tot.fresh), 'input + cache writes') +
+            kpiTile('Cache reads', tilde + formatTokens(tot.cache_read), '') +
             kpiTile('Sessions', tot.sessions.toLocaleString(), '');
 
         drawChart(document.getElementById('usage-chart-main'), months, [
             { key: 'fresh', cls: 'uz-in', keyCls: 'in', label: 'fresh input' },
             { key: 'output', cls: 'uz-out', keyCls: 'out', label: 'output' },
-        ], 190);
+        ], 190, approx);
 
         drawChart(document.getElementById('usage-chart-cache'), months, [
             { key: 'cache_read', cls: 'uz-cr', keyCls: 'cr', label: 'cache reads' },
-        ], 120);
+        ], 120, approx);
 
-        renderTable(months);
+        renderTable(months, approx);
         renderUsagePills();
     }
 
-    function renderTable(months) {
+    function renderTable(months, approx = false) {
         const el = document.getElementById('usage-table');
         if (!el) return;
         if (!months.length) {
@@ -1242,7 +1272,7 @@ function renderUsageView() {
             return;
         }
 
-        const num = n => n ? n.toLocaleString() : '<span class="text-zinc-300 dark:text-cc-line3">0</span>';
+        const num = n => n ? (approx ? '~' : '') + n.toLocaleString() : '<span class="text-zinc-300 dark:text-cc-line3">0</span>';
         const th = (label, right = true) => `<th class="px-4 py-2 text-[11px] font-mono font-medium uppercase tracking-wider text-zinc-400 dark:text-cc-dim ${right ? 'text-right' : 'text-left'}">${label}</th>`;
 
         let html = `<div class="overflow-x-auto"><table class="w-full text-xs font-mono" style="font-variant-numeric: tabular-nums">
@@ -1253,7 +1283,7 @@ function renderUsageView() {
         [...months].reverse().forEach(m => {
             html += `<tr class="border-t border-zinc-100 dark:border-cc-line2 hover:bg-zinc-50 dark:hover:bg-cc-panel">
                 <td class="px-4 py-2 text-zinc-800 dark:text-cc-ink whitespace-nowrap">${esc(monthLongLabel(m.month))}</td>
-                <td class="px-4 py-2 text-right text-zinc-500 dark:text-cc-mut">${num(m.sessions)}</td>
+                <td class="px-4 py-2 text-right text-zinc-500 dark:text-cc-mut">${m.sessions.toLocaleString()}</td>
                 <td class="px-4 py-2 text-right text-zinc-500 dark:text-cc-mut">${num(m.input)}</td>
                 <td class="px-4 py-2 text-right text-zinc-500 dark:text-cc-mut">${num(m.cache_creation)}</td>
                 <td class="px-4 py-2 text-right text-zinc-500 dark:text-cc-mut">${num(m.cache_read)}</td>

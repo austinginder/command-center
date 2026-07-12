@@ -191,8 +191,45 @@ class SessionRegistry {
 	}
 
 	/**
+	 * How trustworthy a provider's token numbers are.
+	 * 'measured'  - real API-reported usage from the transcripts
+	 * 'estimated' - derived from transcript text (~4 chars/token) or partial
+	 *               counters (Grok's context meter); kept out of All rollups
+	 * 'none'      - nothing to compute from (Antigravity stores no transcripts)
+	 */
+	public static function usageType( string $source ): string {
+		switch ( $source ) {
+			case 'claude':
+			case 'opencode':
+			case 'kimi':
+			case 'amp':
+				return 'measured';
+			case 'grok':
+			case 'commandcode':
+			case 't3code':
+				return 'estimated';
+			default:
+				return 'none';
+		}
+	}
+
+	/**
+	 * Provider ids whose usage numbers are estimates.
+	 */
+	public static function estimatedSources(): array {
+		$out = [];
+		foreach ( self::providers() as $id => $class ) {
+			if ( self::usageType( $id ) === 'estimated' ) {
+				$out[] = $id;
+			}
+		}
+		return $out;
+	}
+
+	/**
 	 * Total token usage for a session, or null when the provider doesn't
-	 * track it (CommandCode, T3 Code, Antigravity, Grok store no usable counts).
+	 * track it. Measured for Claude Code, OpenCode, Kimi, Amp; estimated for
+	 * Command Code, T3 Code, Grok (see usageType()); Antigravity has nothing.
 	 */
 	public static function extractUsage( array $session ): ?array {
 		$src   = $session['source'] ?? null;

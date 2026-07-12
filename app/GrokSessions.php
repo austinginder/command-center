@@ -67,6 +67,69 @@ class GrokSessions {
 	}
 
 	/**
+	 * Token usage from the ACP update stream. Grok records no per-request
+	 * usage, but every update carries _meta.totalTokens - a live context-size
+	 * counter that climbs within a compaction segment and resets after
+	 * compaction. Summing each segment's peak gives the real count of tokens
+	 * that entered the context (reported as input). There is no output
+	 * counter, so output is estimated from streamed message/thought text at
+	 * ~4 chars per token - which is why this provider reports as estimated
+	 * (see SessionRegistry::usageType()).
+	 */
+	public static function extractUsage( array $session ): ?array {
+		$file = self::findSessionFile( $session['id'] ?? '', $session['project'] ?? null );
+		if ( ! $file || substr( $file, -13 ) !== 'updates.jsonl' ) {
+			return null;
+		}
+
+		$fp = fopen( $file, 'r' );
+		if ( ! $fp ) {
+			return null;
+		}
+
+		$peak     = 0;
+		$context  = 0;
+		$outChars = 0;
+
+		while ( ( $line = fgets( $fp ) ) !== false ) {
+			if ( strpos( $line, 'totalTokens' ) === false && strpos( $line, '_chunk' ) === false ) {
+				continue;
+			}
+			$obj    = json_decode( $line, true );
+			$params = $obj['params'] ?? [];
+
+			$t = $params['_meta']['totalTokens'] ?? null;
+			if ( is_numeric( $t ) ) {
+				$t = (int) $t;
+				if ( $t < $peak ) {
+					$context += $peak; // compaction reset - bank the segment peak
+				}
+				$peak = $t;
+			}
+
+			$update = $params['update'] ?? [];
+			$kind   = $update['sessionUpdate'] ?? '';
+			if ( $kind === 'agent_message_chunk' || $kind === 'agent_thought_chunk' ) {
+				$outChars += strlen( $update['content']['text'] ?? '' );
+			}
+		}
+
+		fclose( $fp );
+		$context += $peak;
+
+		if ( $context === 0 && $outChars === 0 ) {
+			return null;
+		}
+
+		return [
+			'input'          => $context,
+			'output'         => intdiv( $outChars, 4 ),
+			'cache_read'     => 0,
+			'cache_creation' => 0,
+		];
+	}
+
+	/**
 	 * Concat title + user prompts + agent text for FTS.
 	 * Thoughts and tool I/O are skipped (noise / bloat).
 	 */

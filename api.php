@@ -27,7 +27,7 @@ if ( $method === 'GET' && $path === '/sessions/projects' ) {
 if ( $method === 'GET' && $path === '/sessions/sources' ) {
 	$out = [];
 	foreach ( SessionRegistry::providers() as $id => $class ) {
-		$out[] = [ 'id' => $id, 'label' => $class::sourceLabel() ];
+		$out[] = [ 'id' => $id, 'label' => $class::sourceLabel(), 'usage' => SessionRegistry::usageType( $id ) ];
 	}
 	echo json_encode( $out );
 	exit;

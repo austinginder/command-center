@@ -331,12 +331,24 @@ class SearchIndex {
 	public static function statsDaily( ?string $project = null, ?string $source = null ): array {
 		$db = self::db();
 
+		// Unfiltered token sums stay measured-only so estimated providers
+		// (chars/4 heuristics) never inflate the heatmap; session counts keep
+		// every provider. A source filter shows that provider's own numbers.
+		$tokenFilter = '1';
+		if ( ! $source ) {
+			$estimated = SessionRegistry::estimatedSources();
+			if ( $estimated ) {
+				$quoted      = array_map( fn( $s ) => "'" . SQLite3::escapeString( $s ) . "'", $estimated );
+				$tokenFilter = 'source NOT IN (' . implode( ',', $quoted ) . ')';
+			}
+		}
+
 		$sql = "
 			SELECT date(timestamp_ms / 1000, 'unixepoch', 'localtime') AS day,
 			       COUNT(*) AS sessions,
-			       SUM(COALESCE(tokens_input, 0) + COALESCE(tokens_cache_creation, 0)) AS tokens_in,
-			       SUM(COALESCE(tokens_output, 0)) AS tokens_out,
-			       SUM(COALESCE(tokens_cache_read, 0)) AS tokens_cache
+			       SUM(CASE WHEN $tokenFilter THEN COALESCE(tokens_input, 0) + COALESCE(tokens_cache_creation, 0) ELSE 0 END) AS tokens_in,
+			       SUM(CASE WHEN $tokenFilter THEN COALESCE(tokens_output, 0) ELSE 0 END) AS tokens_out,
+			       SUM(CASE WHEN $tokenFilter THEN COALESCE(tokens_cache_read, 0) ELSE 0 END) AS tokens_cache
 			FROM session_files
 			WHERE timestamp_ms > 0
 		";
