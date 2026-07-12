@@ -2,7 +2,14 @@
 /**
  * SPA HTML shell - single entry point for all view routes.
  * Loads Tailwind CDN, marked.js, and app.js.
+ *
+ * Local assets carry a filemtime cache-buster: without it the browser keeps
+ * a stale app.js after an update and new SPA routes 404 as "signal lost".
  */
+$assetVer = function ( string $path ): string {
+	$file = BASE_DIR . $path;
+	return $path . '?v=' . ( file_exists( $file ) ? filemtime( $file ) : '0' );
+};
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -55,7 +62,7 @@
     </script>
     <!-- Marked.js -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <link rel="stylesheet" href="/assets/style.css">
+    <link rel="stylesheet" href="<?php echo $assetVer( '/assets/style.css' ); ?>">
 </head>
 <body class="min-h-screen flex flex-col bg-zinc-50 dark:bg-cc-bg text-zinc-900 dark:text-cc-ink font-sans antialiased">
 
@@ -94,6 +101,6 @@
 <!-- Main Content -->
 <main id="app" class="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 py-6 pb-12"></main>
 
-<script src="/assets/app.js"></script>
+<script src="<?php echo $assetVer( '/assets/app.js' ); ?>"></script>
 </body>
 </html>
