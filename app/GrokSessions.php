@@ -6,10 +6,16 @@
  * Layout (see ~/.grok/docs/user-guide/17-sessions.md):
  *
  *   ~/.grok/sessions/<url-encoded-cwd>/<session-id>/
- *     summary.json          - title, timestamps, model, message counts
+ *     summary.json          - title, timestamps, model, message counts, session_kind
  *     updates.jsonl         - ACP session/update stream (authoritative conversation)
+ *     signals.json          - aggregated counters (tokens, tools, duration, lines)
  *     chat_history.jsonl    - raw model messages (not used for UI replay)
- *     plan.json / signals.json / rewind_points.jsonl / subagents/ …
+ *     plan.json / rewind_points.jsonl / subagents/ …
+ *
+ * Subagent runs are full session directories with summary.session_kind =
+ * "subagent". They are hidden from listSessions/listProjects (same idea as
+ * Claude nesting children under the parent) but remain openable by id via
+ * hasSession/getConversation.
  *
  * When the encoded cwd exceeds 255 bytes, Grok uses a slug+hash directory
  * and records the real path in a `.cwd` file inside the group.
@@ -67,62 +73,115 @@ class GrokSessions {
 	}
 
 	/**
-	 * Token usage from the ACP update stream. Grok records no per-request
-	 * usage, but every update carries _meta.totalTokens - a live context-size
-	 * counter that climbs within a compaction segment and resets after
-	 * compaction. Summing each segment's peak gives the real count of tokens
-	 * that entered the context (reported as input). There is no output
-	 * counter, so output is estimated from streamed message/thought text at
-	 * ~4 chars per token - which is why this provider reports as estimated
-	 * (see SessionRegistry::usageType()).
+	 * Token usage for the heatmap / usage views.
+	 *
+	 * Prefer signals.json when present: totalTokensBeforeCompaction is Grok's
+	 * own rollup of context tokens that entered the window (including segments
+	 * later compacted). Peak-segment summing of _meta.totalTokens overcounts
+	 * badly on long sessions.
+	 *
+	 * There is still no per-request output counter, so output is estimated from
+	 * streamed message/thought text at ~4 chars per token. Provider stays
+	 * 'estimated' (see SessionRegistry::usageType()).
 	 */
 	public static function extractUsage( array $session ): ?array {
-		$file = self::findSessionFile( $session['id'] ?? '', $session['project'] ?? null );
-		if ( ! $file || substr( $file, -13 ) !== 'updates.jsonl' ) {
+		$dir = self::findSessionDir( $session['id'] ?? '', $session['project'] ?? null );
+		if ( ! $dir ) {
 			return null;
+		}
+
+		$inputFromSignals = null;
+		$signals          = self::readJson( $dir . '/signals.json' );
+		if ( is_array( $signals ) ) {
+			$before = (int) ( $signals['totalTokensBeforeCompaction'] ?? 0 );
+			$used   = (int) ( $signals['contextTokensUsed'] ?? 0 );
+			if ( $before > 0 ) {
+				$inputFromSignals = $before;
+			} elseif ( $used > 0 ) {
+				// Short sessions may never compact; current context is the best figure.
+				$inputFromSignals = $used;
+			}
+		}
+
+		$file = $dir . '/updates.jsonl';
+		if ( ! file_exists( $file ) ) {
+			if ( $inputFromSignals === null ) {
+				return null;
+			}
+			return [
+				'input'          => $inputFromSignals,
+				'output'         => 0,
+				'cache_read'     => 0,
+				'cache_creation' => 0,
+			];
 		}
 
 		$fp = fopen( $file, 'r' );
 		if ( ! $fp ) {
-			return null;
+			if ( $inputFromSignals === null ) {
+				return null;
+			}
+			return [
+				'input'          => $inputFromSignals,
+				'output'         => 0,
+				'cache_read'     => 0,
+				'cache_creation' => 0,
+			];
 		}
 
-		$peak     = 0;
-		$context  = 0;
-		$outChars = 0;
+		// When signals already supplied input, only scan for output text.
+		// Otherwise also rebuild input from _meta.totalTokens peaks.
+		$needContext = $inputFromSignals === null;
+		$peak        = 0;
+		$context     = 0;
+		$outChars    = 0;
 
 		while ( ( $line = fgets( $fp ) ) !== false ) {
-			if ( strpos( $line, 'totalTokens' ) === false && strpos( $line, '_chunk' ) === false ) {
+			if ( $needContext ) {
+				if ( strpos( $line, 'totalTokens' ) === false && strpos( $line, '_chunk' ) === false ) {
+					continue;
+				}
+			} elseif ( strpos( $line, '_chunk' ) === false ) {
 				continue;
 			}
-			$obj    = json_decode( $line, true );
-			$params = $obj['params'] ?? [];
 
-			$t = $params['_meta']['totalTokens'] ?? null;
-			if ( is_numeric( $t ) ) {
-				$t = (int) $t;
-				if ( $t < $peak ) {
-					$context += $peak; // compaction reset - bank the segment peak
+			$obj    = json_decode( $line, true );
+			$params = is_array( $obj ) ? ( $obj['params'] ?? [] ) : [];
+			if ( ! is_array( $params ) ) {
+				continue;
+			}
+
+			if ( $needContext ) {
+				$t = $params['_meta']['totalTokens'] ?? null;
+				if ( is_numeric( $t ) ) {
+					$t = (int) $t;
+					if ( $t < $peak ) {
+						$context += $peak; // compaction reset - bank the segment peak
+					}
+					$peak = $t;
 				}
-				$peak = $t;
 			}
 
 			$update = $params['update'] ?? [];
-			$kind   = $update['sessionUpdate'] ?? '';
+			$kind   = is_array( $update ) ? ( $update['sessionUpdate'] ?? '' ) : '';
 			if ( $kind === 'agent_message_chunk' || $kind === 'agent_thought_chunk' ) {
 				$outChars += strlen( $update['content']['text'] ?? '' );
 			}
 		}
 
 		fclose( $fp );
-		$context += $peak;
+		if ( $needContext ) {
+			$context += $peak;
+		}
 
-		if ( $context === 0 && $outChars === 0 ) {
+		$input = $inputFromSignals !== null ? $inputFromSignals : $context;
+
+		if ( $input === 0 && $outChars === 0 ) {
 			return null;
 		}
 
 		return [
-			'input'          => $context,
+			'input'          => $input,
 			'output'         => intdiv( $outChars, 4 ),
 			'cache_read'     => 0,
 			'cache_creation' => 0,
@@ -130,7 +189,7 @@ class GrokSessions {
 	}
 
 	/**
-	 * Concat title + user prompts + agent text for FTS.
+	 * Concat title + auto recaps + user prompts + agent text for FTS.
 	 * Thoughts and tool I/O are skipped (noise / bloat).
 	 */
 	public static function extractSessionText( array $session ): string {
@@ -190,6 +249,16 @@ class GrokSessions {
 				$agentBuf .= self::contentText( $update['content'] ?? null );
 				continue;
 			}
+			// Auto-generated mid-session summaries - high-signal FTS material.
+			if ( $type === 'session_recap' ) {
+				$flushUser();
+				$flushAgent();
+				$recap = trim( (string) ( $update['summary'] ?? '' ) );
+				if ( $recap !== '' ) {
+					$parts[] = mb_substr( $recap, 0, $maxChars );
+				}
+				continue;
+			}
 			// Boundary: tool calls / thoughts end a text run.
 			if ( $type === 'tool_call' || $type === 'tool_call_update' || $type === 'agent_thought_chunk' ) {
 				$flushUser();
@@ -234,6 +303,10 @@ class GrokSessions {
 				}
 
 				$summary = self::readJson( $summaryFile ) ?: [];
+				// Child agents are full session dirs; hide from the main index.
+				if ( self::isSubagentSession( $summary ) ) {
+					continue;
+				}
 				// Prefer cwd from summary when present (handles slug+hash dirs).
 				$path = $summary['info']['cwd'] ?? $projectPath;
 				$name = $path !== '' ? self::projectDisplayName( $path ) : $projectName;
@@ -296,7 +369,10 @@ class GrokSessions {
 				}
 
 				$summary = self::readJson( $summaryFile ) ?: [];
-				$path    = $summary['info']['cwd'] ?? self::resolveProjectPath( $cwdDir );
+				if ( self::isSubagentSession( $summary ) ) {
+					continue;
+				}
+				$path = $summary['info']['cwd'] ?? self::resolveProjectPath( $cwdDir );
 				if ( $path === '' ) {
 					$path = '(unknown)';
 				}
@@ -636,6 +712,14 @@ class GrokSessions {
 
 	private static function isValidSessionId( string $id ): bool {
 		return (bool) preg_match( '/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $id );
+	}
+
+	/**
+	 * Spawned child agents get their own session dir with session_kind=subagent.
+	 * Primary / forked sessions omit the field or use another value.
+	 */
+	private static function isSubagentSession( array $summary ): bool {
+		return ( $summary['session_kind'] ?? '' ) === 'subagent';
 	}
 
 	/**
