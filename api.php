@@ -23,18 +23,21 @@ if ( $method === 'GET' && $path === '/sessions' ) {
 	exit;
 }
 
-// GET /api/sessions/{id} - single session meta (incl. nested subagents / parent link)
-if ( $method === 'GET' && preg_match( '#^/sessions/([A-Za-z0-9_-]+)$#', $path, $m ) ) {
-	$source  = $_GET['source'] ?? null;
-	$session = SessionRegistry::getSession( $m[1], $source ?: null );
-	if ( ! $session ) {
-		http_response_code( 404 );
-		echo json_encode( [ 'error' => 'Session not found' ] );
-		exit;
+// Fixed /sessions/* paths MUST come before the /sessions/{id} catch-all.
+// GET /api/sessions/projects - list unique projects across providers
+if ( $method === 'GET' && $path === '/sessions/projects' ) {
+	$source = $_GET['source'] ?? null;
+	echo json_encode( SessionRegistry::listProjects( $source ?: null ) );
+	exit;
+}
+
+// GET /api/sessions/sources - available providers
+if ( $method === 'GET' && $path === '/sessions/sources' ) {
+	$out = [];
+	foreach ( SessionRegistry::providers() as $id => $class ) {
+		$out[] = [ 'id' => $id, 'label' => $class::sourceLabel(), 'usage' => SessionRegistry::usageType( $id ) ];
 	}
-	// Annotate retention on the parent record only (children inherit policy via source).
-	$annotated = Retention::annotateSessions( [ $session ] );
-	echo json_encode( $annotated[0] ?? $session );
+	echo json_encode( $out );
 	exit;
 }
 
@@ -62,23 +65,6 @@ if ( $method === 'PUT' && $path === '/retention/preferences' ) {
 		http_response_code( 500 );
 		echo json_encode( [ 'error' => $e->getMessage() ] );
 	}
-	exit;
-}
-
-// GET /api/sessions/projects - list unique projects across providers
-if ( $method === 'GET' && $path === '/sessions/projects' ) {
-	$source = $_GET['source'] ?? null;
-	echo json_encode( SessionRegistry::listProjects( $source ?: null ) );
-	exit;
-}
-
-// GET /api/sessions/sources - available providers
-if ( $method === 'GET' && $path === '/sessions/sources' ) {
-	$out = [];
-	foreach ( SessionRegistry::providers() as $id => $class ) {
-		$out[] = [ 'id' => $id, 'label' => $class::sourceLabel(), 'usage' => SessionRegistry::usageType( $id ) ];
-	}
-	echo json_encode( $out );
 	exit;
 }
 
@@ -155,6 +141,21 @@ if ( $method === 'GET' && $path === '/sessions/search' ) {
 if ( $method === 'GET' && preg_match( '#^/sessions/([A-Za-z0-9_-]+)/conversation$#', $path, $m ) ) {
 	$source = $_GET['source'] ?? null;
 	echo json_encode( SessionRegistry::getConversation( $m[1], $source ?: null ) );
+	exit;
+}
+
+// GET /api/sessions/{id} - single session meta (incl. nested subagents / parent link).
+// Must stay AFTER fixed paths like /sessions/projects, /sessions/sources, /sessions/search.
+if ( $method === 'GET' && preg_match( '#^/sessions/([A-Za-z0-9_-]+)$#', $path, $m ) ) {
+	$source  = $_GET['source'] ?? null;
+	$session = SessionRegistry::getSession( $m[1], $source ?: null );
+	if ( ! $session ) {
+		http_response_code( 404 );
+		echo json_encode( [ 'error' => 'Session not found' ] );
+		exit;
+	}
+	$annotated = Retention::annotateSessions( [ $session ] );
+	echo json_encode( $annotated[0] ?? $session );
 	exit;
 }
 
