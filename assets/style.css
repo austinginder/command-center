@@ -181,7 +181,8 @@ details.tool-group[open] > summary .tool-group-label::before { content: '▾ '; 
 .dark .session-row-child {
     background: rgba(255, 255, 255, 0.015);
 }
-.subagent-toggle svg.rotate-90 {
+.subagent-toggle svg.rotate-90,
+#retention-chevron.rotate-90 {
     transform: rotate(90deg);
 }
 

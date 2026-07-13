@@ -369,19 +369,20 @@ function renderDashboard() {
                 </div>
             </div>
 
-            <!-- Retention monitor -->
-            <div id="retention-strip" class="hidden bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm px-4 py-3">
-                <div class="flex items-start justify-between gap-3 mb-2">
-                    <div>
-                        <div class="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-cc-dim">Retention</div>
-                        <div id="retention-summary" class="text-[11px] font-mono text-zinc-500 dark:text-cc-mut mt-0.5"></div>
-                    </div>
-                    <div class="flex items-center gap-2 shrink-0">
-                        <button type="button" id="retention-expiring-btn" class="hidden text-[11px] font-mono px-2 py-1 rounded-lg border border-amber-500/30 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10 transition-colors">Expiring soon</button>
-                        <button type="button" id="retention-config-btn" class="text-[11px] font-mono px-2 py-1 rounded-lg border border-zinc-200 dark:border-cc-line text-zinc-500 dark:text-cc-mut hover:text-zinc-800 dark:hover:text-cc-soft transition-colors">Configure</button>
-                    </div>
+            <!-- Retention monitor (collapsed by default - low-touch) -->
+            <div id="retention-strip" class="hidden bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm">
+                <div class="flex items-center gap-2 px-3 py-2">
+                    <button type="button" id="retention-toggle" class="flex flex-1 items-center gap-2 min-w-0 text-left group" aria-expanded="false">
+                        <svg id="retention-chevron" class="w-3.5 h-3.5 shrink-0 text-zinc-400 dark:text-cc-dim transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                        <span class="text-[11px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-cc-dim">Retention</span>
+                        <span id="retention-summary" class="min-w-0 truncate text-[11px] font-mono text-zinc-500 dark:text-cc-mut"></span>
+                    </button>
+                    <button type="button" id="retention-expiring-btn" class="hidden shrink-0 text-[11px] font-mono px-2 py-1 rounded-lg border border-amber-500/30 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10 transition-colors">Expiring soon</button>
+                    <button type="button" id="retention-config-btn" class="shrink-0 text-[11px] font-mono px-2 py-1 rounded-lg border border-zinc-200 dark:border-cc-line text-zinc-500 dark:text-cc-mut hover:text-zinc-800 dark:hover:text-cc-soft transition-colors">Configure</button>
                 </div>
-                <div id="retention-rows" class="space-y-1.5"></div>
+                <div id="retention-body" class="hidden border-t border-zinc-100 dark:border-cc-line2 px-4 py-3">
+                    <div id="retention-rows" class="space-y-1.5"></div>
+                </div>
             </div>
 
             <!-- Retention prefs modal -->
@@ -399,7 +400,7 @@ function renderDashboard() {
                     </label>
                     <label class="mt-3 flex items-center gap-2 text-xs text-zinc-600 dark:text-cc-soft cursor-pointer">
                         <input type="checkbox" id="retention-show-strip" class="rounded border-zinc-300 dark:border-cc-line">
-                        Show retention strip on dashboard
+                        Show retention bar on dashboard (collapsed by default)
                     </label>
                     <label class="mt-2 flex items-center gap-2 text-xs text-zinc-600 dark:text-cc-soft cursor-pointer">
                         <input type="checkbox" id="retention-show-badges" class="rounded border-zinc-300 dark:border-cc-line">
@@ -477,6 +478,26 @@ function renderDashboard() {
         renderList(); // badges depend on prefs
     }
 
+    function retentionExpanded() {
+        try {
+            const v = localStorage.getItem('cc-retention-expanded');
+            if (v === '1') return true;
+            if (v === '0') return false;
+        } catch (e) {}
+        // Default collapsed. Auto-open once when there is real risk and user has no preference yet.
+        return false;
+    }
+
+    function setRetentionExpanded(on) {
+        try { localStorage.setItem('cc-retention-expanded', on ? '1' : '0'); } catch (e) {}
+        const body = document.getElementById('retention-body');
+        const chev = document.getElementById('retention-chevron');
+        const toggle = document.getElementById('retention-toggle');
+        if (body) body.classList.toggle('hidden', !on);
+        if (chev) chev.classList.toggle('rotate-90', on);
+        if (toggle) toggle.setAttribute('aria-expanded', on ? 'true' : 'false');
+    }
+
     function renderRetentionStrip() {
         const strip = document.getElementById('retention-strip');
         const rowsEl = document.getElementById('retention-rows');
@@ -495,11 +516,17 @@ function renderDashboard() {
         const providers = retentionReport.providers || [];
         const withSessions = providers.filter(p => (p.stats && p.stats.total > 0) || p.kind === 'days');
         const atRisk = retentionReport.at_risk || 0;
+        const dayPolicies = providers.filter(p => p.kind === 'days');
 
         if (summaryEl) {
-            summaryEl.textContent = atRisk
-                ? `${atRisk} session${atRisk === 1 ? '' : 's'} within ${warn}d warning window`
-                : `No sessions inside ${warn}d warning window`;
+            if (atRisk > 0) {
+                summaryEl.textContent = `· ${atRisk} at risk within ${warn}d`;
+                summaryEl.classList.add('text-amber-600', 'dark:text-amber-400');
+            } else {
+                const ttl = dayPolicies.map(p => `${p.label || p.id} ${formatRetentionDays(p.days)}`).slice(0, 3).join(', ');
+                summaryEl.textContent = ttl ? `· ${ttl}` : '· no auto-delete policies active';
+                summaryEl.classList.remove('text-amber-600', 'dark:text-amber-400');
+            }
         }
         if (expBtn) {
             if (atRisk > 0) {
@@ -509,6 +536,17 @@ function renderDashboard() {
             } else {
                 expBtn.classList.add('hidden');
             }
+        }
+
+        // Auto-expand once when risk appears and user has never toggled.
+        try {
+            if (atRisk > 0 && localStorage.getItem('cc-retention-expanded') === null) {
+                setRetentionExpanded(true);
+            } else {
+                setRetentionExpanded(retentionExpanded());
+            }
+        } catch (e) {
+            setRetentionExpanded(false);
         }
 
         // Prefer providers with day TTL first, then the rest that have sessions.
@@ -1292,6 +1330,9 @@ function renderDashboard() {
     document.getElementById('retention-modal-cancel')?.addEventListener('click', closeRetentionModal);
     document.getElementById('retention-modal-backdrop')?.addEventListener('click', closeRetentionModal);
     document.getElementById('retention-modal-save')?.addEventListener('click', saveRetentionPrefs);
+    document.getElementById('retention-toggle')?.addEventListener('click', () => {
+        setRetentionExpanded(!retentionExpanded());
+    });
     document.getElementById('retention-expiring-btn')?.addEventListener('click', () => {
         expiringOnly = !expiringOnly;
         shown = PAGE_SIZE;
