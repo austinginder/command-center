@@ -293,13 +293,31 @@ class ClaudeSessions {
 				continue;
 			}
 
-			// Last entry per sessionId wins (most recent prompt).
-			$sessions[ $obj['sessionId'] ] = [
-				'id'        => $obj['sessionId'],
-				'display'   => $obj['display'] ?? '',
-				'timestamp' => $obj['timestamp'] ?? 0,
-				'project'   => $sessionProject,
-			];
+			$sid     = $obj['sessionId'];
+			$display = trim( (string) ( $obj['display'] ?? '' ) );
+			$ts      = $obj['timestamp'] ?? 0;
+
+			if ( ! isset( $sessions[ $sid ] ) ) {
+				// First non-slash / non-stub prompt is a better session title
+				// than the most recent one (often /quit, /model, "yes").
+				$sessions[ $sid ] = [
+					'id'        => $sid,
+					'display'   => $display,
+					'timestamp' => $ts,
+					'project'   => $sessionProject,
+				];
+			} else {
+				// Timestamp: last entry wins (most recent activity).
+				if ( $ts >= ( $sessions[ $sid ]['timestamp'] ?? 0 ) ) {
+					$sessions[ $sid ]['timestamp'] = $ts;
+					$sessions[ $sid ]['project']   = $sessionProject;
+				}
+				// Title: keep the first good prompt; upgrade a weak one.
+				if ( self::isWeakSessionTitle( $sessions[ $sid ]['display'] ?? '' )
+					&& ! self::isWeakSessionTitle( $display ) ) {
+					$sessions[ $sid ]['display'] = $display;
+				}
+			}
 		}
 
 		fclose( $fp );
@@ -317,6 +335,15 @@ class ClaudeSessions {
 
 			$file = self::findSessionFile( $s['id'], $s['project'] );
 			$s['size'] = $file && file_exists( $file ) ? filesize( $file ) : 0;
+
+			// Prefer Claude's generated summary when the history title is weak
+			// (or missing). Only peeks the transcript when needed.
+			if ( $file && file_exists( $file ) && self::isWeakSessionTitle( $s['display'] ?? '' ) ) {
+				$better = self::betterSessionTitle( $file, $s['display'] ?? '' );
+				if ( $better !== '' ) {
+					$s['display'] = $better;
+				}
+			}
 
 			$count = self::countSubagents( $s['id'], $s['project'] ?? '', $file );
 			if ( $count > 0 ) {
@@ -996,35 +1023,136 @@ class ClaudeSessions {
 		return is_array( $obj ) && ( $obj['sessionId'] ?? '' ) === $sessionId;
 	}
 
+	/**
+	 * Titles that make a poor session list label: bare slash-commands, stubs,
+	 * tool-result noise, or empty. A skill invocation with a real prompt after
+	 * the command (`/dev-foo please fix headers`) is kept.
+	 */
+	private static function isWeakSessionTitle( string $title ): bool {
+		$t = trim( $title );
+		if ( $t === '' ) {
+			return true;
+		}
+		if ( str_starts_with( $t, '<local-command' ) || str_starts_with( $t, '<command-' ) ) {
+			return true;
+		}
+		// Bracket-only paste stubs from history.
+		if ( preg_match( '#^\[(Pasted text|Image)[^\]]*\]\s*$#i', $t ) ) {
+			return true;
+		}
+		// Bare slash commands (/model, /quit) or tiny args; keep if a real prompt follows.
+		if ( preg_match( '#^/[a-zA-Z0-9_-]+(?:\s+(.*))?$#s', $t, $m ) ) {
+			$rest = trim( $m[1] ?? '' );
+			if ( $rest === '' || mb_strlen( $rest ) < 12 ) {
+				return true;
+			}
+			return false;
+		}
+		$lower = mb_strtolower( $t );
+		if ( in_array( $lower, [ 'yes', 'no', 'ok', 'y', 'n', 'thanks', 'thank you', 'done', 'sure', 'continue', 'please', 'lgtm', 'ship it' ], true ) ) {
+			return true;
+		}
+		// Extremely short one-word replies.
+		if ( mb_strlen( $t ) < 4 ) {
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Prefer Claude's generated summary; else first non-slash user turn.
+	 * Only called when the history-derived title is weak.
+	 */
+	private static function betterSessionTitle( string $file, string $current ): string {
+		$summary = self::peekTranscriptSummary( $file );
+		if ( $summary !== '' && ! self::isWeakSessionTitle( $summary ) ) {
+			return mb_substr( $summary, 0, 160 );
+		}
+		$first = self::firstUserPromptFromJsonl( $file );
+		if ( $first !== '' && ! self::isWeakSessionTitle( $first ) ) {
+			return $first;
+		}
+		return $current;
+	}
+
+	/**
+	 * Claude writes type=summary near the end of the transcript. Read the
+	 * last ~64KB only so listSessions stays cheap.
+	 */
+	private static function peekTranscriptSummary( string $file ): string {
+		$size = @filesize( $file );
+		if ( ! $size || $size <= 0 ) {
+			return '';
+		}
+		$fh = @fopen( $file, 'r' );
+		if ( ! $fh ) {
+			return '';
+		}
+		$window = 65536;
+		if ( $size > $window ) {
+			fseek( $fh, $size - $window );
+			fgets( $fh ); // drop partial first line
+		}
+		$summary = '';
+		while ( ( $line = fgets( $fh ) ) !== false ) {
+			if ( ! str_contains( $line, '"summary"' ) ) {
+				continue;
+			}
+			$obj = json_decode( trim( $line ), true );
+			if ( ! is_array( $obj ) ) {
+				continue;
+			}
+			if ( ( $obj['type'] ?? '' ) === 'summary' && ! empty( $obj['summary'] ) && is_string( $obj['summary'] ) ) {
+				$summary = trim( $obj['summary'] );
+			}
+		}
+		fclose( $fh );
+		return $summary;
+	}
+
 	private static function firstUserPromptFromJsonl( string $file ): string {
 		$fh = @fopen( $file, 'r' );
 		if ( ! $fh ) {
 			return '';
 		}
-		$maxLines = 40;
+		$maxLines = 80;
 		$n        = 0;
+		$fallback = '';
 		while ( ( $line = fgets( $fh ) ) !== false && $n < $maxLines ) {
 			$n++;
 			$obj = json_decode( trim( $line ), true );
 			if ( ! is_array( $obj ) || ( $obj['type'] ?? '' ) !== 'user' ) {
 				continue;
 			}
+			$text = '';
 			$content = $obj['message']['content'] ?? '';
 			if ( is_string( $content ) && trim( $content ) !== '' ) {
-				fclose( $fh );
-				return mb_substr( trim( $content ), 0, 120 );
-			}
-			if ( is_array( $content ) ) {
+				$text = trim( $content );
+			} elseif ( is_array( $content ) ) {
 				foreach ( $content as $block ) {
 					if ( ( $block['type'] ?? '' ) === 'text' && ! empty( $block['text'] ) ) {
-						fclose( $fh );
-						return mb_substr( trim( $block['text'] ), 0, 120 );
+						$text = trim( $block['text'] );
+						break;
 					}
 				}
 			}
+			if ( $text === '' ) {
+				continue;
+			}
+			// Skip tool_result-only user rows and meta wrappers.
+			if ( str_starts_with( $text, '[{"type":"tool_result"' ) || str_starts_with( $text, '[{"tool_use_id"' ) ) {
+				continue;
+			}
+			if ( $fallback === '' ) {
+				$fallback = mb_substr( $text, 0, 160 );
+			}
+			if ( ! self::isWeakSessionTitle( $text ) ) {
+				fclose( $fh );
+				return mb_substr( $text, 0, 160 );
+			}
 		}
 		fclose( $fh );
-		return '';
+		return $fallback;
 	}
 
 	/**

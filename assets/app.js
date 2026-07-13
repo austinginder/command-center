@@ -215,19 +215,29 @@ function subagentStatusDot(status) {
 }
 
 // CLI resume recipes per source. Sources absent here can't be resumed.
+// OpenCode: `opencode --session <id>`  Kimi: `kimi --session <id>`
+// T3 Code is an Electron GUI with no CLI resume - open the app + note the thread id.
 const RESUME_BINS = {
-	amp:         { bin: 'amp',    flag: '',                               resume: 'threads continue' },
-    claude:      { bin: 'claude', flag: '--dangerously-skip-permissions', resume: '--resume' },
-    commandcode: { bin: 'cmd',    flag: '--yolo',                         resume: '--resume' },
-    antigravity: { bin: 'agy',    flag: '--dangerously-skip-permissions', resume: '--conversation' },
-    gemini:      { bin: 'gemini', flag: '',                               resume: '--resume' },
-    grok:        { bin: 'grok',   flag: '',                               resume: '--resume' },
+	amp:         { bin: 'amp',      flag: '',                               resume: 'threads continue' },
+    claude:      { bin: 'claude',   flag: '--dangerously-skip-permissions', resume: '--resume' },
+    commandcode: { bin: 'cmd',      flag: '--yolo',                         resume: '--resume' },
+    antigravity: { bin: 'agy',      flag: '--dangerously-skip-permissions', resume: '--conversation' },
+    gemini:      { bin: 'gemini',   flag: '',                               resume: '--resume' },
+    grok:        { bin: 'grok',     flag: '',                               resume: '--resume' },
+    opencode:    { bin: 'opencode', flag: '',                               resume: '--session' },
+    kimi:        { bin: 'kimi',     flag: '',                               resume: '--session' },
+    t3code:      { kind: 'open-app', app: 'T3 Code (Alpha)' },
 };
 
 function resumeCommand(source, project, sessionId) {
     const cfg = RESUME_BINS[source];
     if (!cfg) return null;
     const shellQuote = value => `'${String(value).replace(/'/g, `'"'"'`)}'`;
+    if (cfg.kind === 'open-app') {
+        // GUI-only: open the app and leave the thread id as a shell comment
+        // so the user can find/paste it inside T3.
+        return `open -a ${shellQuote(cfg.app)}  # thread ${sessionId}`;
+    }
     const cd = project && project !== '-' ? `cd ${shellQuote(project)} && ` : '';
     return cd + `${cfg.bin} ${cfg.flag ? cfg.flag + ' ' : ''}${cfg.resume} ${shellQuote(sessionId)}`;
 }

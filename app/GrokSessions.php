@@ -743,6 +743,13 @@ class GrokSessions {
 			? (int) @filesize( $updatesFile )
 			: (int) @filesize( $summaryFile );
 
+		// Stub sessions (created, never messaged) have empty titles and tiny
+		// updates.jsonl. Label them so the list is scannable and index drift
+		// is obvious, rather than showing a blank row.
+		if ( $display === '' ) {
+			$display = 'Empty session';
+		}
+
 		$record = [
 			'id'          => $id,
 			'display'     => $display,
