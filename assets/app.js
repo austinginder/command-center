@@ -216,9 +216,11 @@ function subagentStatusDot(status) {
 
 // CLI resume recipes per source. Sources absent here can't be resumed.
 // OpenCode: `opencode --session <id>`  Kimi: `kimi --session <id>`
-// T3 Code (https://github.com/pingdotgg/t3code): desktop deep link
-//   t3code://app/{environmentId}/{threadId}
-// which maps to the SPA route /_chat/$environmentId/$threadId.
+// T3 Code (https://github.com/pingdotgg/t3code): no true external resume yet.
+//   - t3code://app/... is the desktop content scheme (always loads root).
+//     open-url does not deep-link into /{environmentId}/{threadId}.
+//   - http://127.0.0.1:<port>/... hits the pairing gate ("desktop-managed").
+//   Best we can do: open the app and name the sidebar thread in a comment.
 const RESUME_BINS = {
 	amp:         { bin: 'amp',      flag: '',                               resume: 'threads continue' },
     claude:      { bin: 'claude',   flag: '--dangerously-skip-permissions', resume: '--resume' },
@@ -228,23 +230,20 @@ const RESUME_BINS = {
     grok:        { bin: 'grok',     flag: '',                               resume: '--resume' },
     opencode:    { bin: 'opencode', flag: '',                               resume: '--session' },
     kimi:        { bin: 'kimi',     flag: '',                               resume: '--session' },
-    t3code:      { kind: 't3-deep-link', bundleId: 'com.t3tools.t3code', scheme: 't3code' },
+    t3code:      { kind: 't3-open-app', bundleId: 'com.t3tools.t3code' },
 };
 
-function resumeCommand(source, project, sessionId, environmentId) {
+function resumeCommand(source, project, sessionId, environmentId, display) {
     const cfg = RESUME_BINS[source];
     if (!cfg) return null;
     const shellQuote = value => `'${String(value).replace(/'/g, `'"'"'`)}'`;
-    if (cfg.kind === 't3-deep-link') {
-        // Force the T3 bundle so open works even when the OS URL handler is not
-        // registered (common with Alpha desktop builds). Needs environmentId
-        // from ~/.t3/userdata/environment-id (passed on the session record).
-        if (environmentId) {
-            const url = `${cfg.scheme}://app/${environmentId}/${sessionId}`;
-            return `open -b ${shellQuote(cfg.bundleId)} ${shellQuote(url)}`;
-        }
-        // Fallback: launch the app; user picks the thread in the sidebar.
-        return `open -b ${shellQuote(cfg.bundleId)}`;
+    if (cfg.kind === 't3-open-app') {
+        // Open the desktop app; user clicks the thread in the sidebar.
+        // Include title (preferred) + short id so the right row is obvious.
+        const label = (display && String(display).trim()) || sessionId;
+        const short = label.length > 80 ? label.slice(0, 77) + '...' : label;
+        const safeComment = String(short).replace(/\s+/g, ' ').replace(/#/g, '');
+        return `open -b ${shellQuote(cfg.bundleId)}  # open thread: ${safeComment}`;
     }
     const cd = project && project !== '-' ? `cd ${shellQuote(project)} && ` : '';
     return cd + `${cfg.bin} ${cfg.flag ? cfg.flag + ' ' : ''}${cfg.resume} ${shellQuote(sessionId)}`;
@@ -1001,11 +1000,15 @@ function renderDashboard() {
         return list;
     }
 
-    function copyBtnHtml(source, project, id, environmentId) {
+    function copyBtnHtml(source, project, id, environmentId, display) {
         if (!RESUME_BINS[source]) return '<span class="w-[26px] shrink-0"></span>';
         const envAttr = environmentId ? ` data-env="${esc(environmentId)}"` : '';
+        const titleAttr = display ? ` data-display="${esc(display)}"` : '';
+        const tip = source === 't3code'
+            ? 'Open T3 Code (pick thread in sidebar)'
+            : 'Copy CLI resume command';
         return `<button class="copy-resume-btn shrink-0 p-1 rounded text-zinc-300 dark:text-cc-dim opacity-0 group-hover:opacity-100 hover:!text-blue-500 transition-all"
-            data-project="${esc(project || '')}" data-sid="${esc(id)}" data-source="${esc(source)}"${envAttr} title="Copy CLI resume command">${ICON_COPY}</button>`;
+            data-project="${esc(project || '')}" data-sid="${esc(id)}" data-source="${esc(source)}"${envAttr}${titleAttr} title="${esc(tip)}">${ICON_COPY}</button>`;
     }
 
     function rowHtml(s) {
@@ -1034,7 +1037,7 @@ function renderDashboard() {
             <span class="hidden md:block max-w-[240px] truncate text-xs font-mono text-zinc-400 dark:text-cc-dim" title="${esc(shortPath(s.project) || '')}">${esc(projectLabel(s.project) || s.projectName || '')}</span>
             <span class="hidden sm:block w-20 text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap">${s.size ? formatBytes(s.size) : ''}</span>
             <span class="text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap" style="width:4.5rem">${s.timestamp_s ? clockTime(s.timestamp_s) : ''}</span>
-            ${copyBtnHtml(src, s.project, s.id, s.environmentId)}
+            ${copyBtnHtml(src, s.project, s.id, s.environmentId, s.display)}
         </div>`;
 
         if (expanded && children.length) {
@@ -1176,7 +1179,7 @@ function renderDashboard() {
                     <span class="flex-1 min-w-0 truncate text-sm font-medium text-zinc-800 dark:text-cc-ink">${esc(s.display || s.id)}</span>
                     <span class="hidden sm:block max-w-[220px] truncate text-xs font-mono text-zinc-400 dark:text-cc-dim" title="${esc(shortPath(s.project) || '')}">${esc(projectLabel(s.project) || s.projectName || '')}</span>
                     <span class="text-xs font-mono text-zinc-400 dark:text-cc-dim whitespace-nowrap shrink-0">${s.timestamp_s ? timeAgo(s.timestamp_s) : ''}</span>
-                    ${copyBtnHtml(src, s.project, s.id, s.environmentId)}
+                    ${copyBtnHtml(src, s.project, s.id, s.environmentId, s.display)}
                 </div>
                 <div class="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-cc-mut line-clamp-2">${typeBadge}${s.snippet || ''}</div>
             </div>`;
@@ -1239,7 +1242,13 @@ function renderDashboard() {
         container.querySelectorAll('.copy-resume-btn').forEach(btn => {
             btn.addEventListener('click', e => {
                 e.stopPropagation();
-                const cmd = resumeCommand(btn.dataset.source, btn.dataset.project, btn.dataset.sid, btn.dataset.env);
+                const cmd = resumeCommand(
+                    btn.dataset.source,
+                    btn.dataset.project,
+                    btn.dataset.sid,
+                    btn.dataset.env,
+                    btn.dataset.display
+                );
                 if (cmd) copyWithFlash(btn, cmd);
             });
         });
@@ -1846,10 +1855,13 @@ function renderSessionView(sessionId) {
                 }
             }
 
-            const cmd = resumeCommand(s.source, s.project, sessionId, s.environmentId);
+            const cmd = resumeCommand(s.source, s.project, sessionId, s.environmentId, s.display);
             const btn = document.getElementById('session-copy-resume-btn');
             if (cmd && btn) {
                 btn.classList.remove('hidden');
+                if (s.source === 't3code') {
+                    btn.title = 'Open T3 Code (pick thread in sidebar)';
+                }
                 btn.addEventListener('click', () => copyWithFlash(btn, cmd, '.resume-icon'));
             }
         })
