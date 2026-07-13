@@ -303,49 +303,47 @@ class GrokSessions {
 				}
 
 				$summary = self::readJson( $summaryFile ) ?: [];
-				// Child agents are full session dirs; hide from the main index.
+				// Child agents are full session dirs; hide from the main index
+				// (they nest under the parent via children[]).
 				if ( self::isSubagentSession( $summary ) ) {
 					continue;
 				}
 				// Prefer cwd from summary when present (handles slug+hash dirs).
 				$path = $summary['info']['cwd'] ?? $projectPath;
-				$name = $path !== '' ? self::projectDisplayName( $path ) : $projectName;
 
 				if ( $project !== null && $project !== '' && $path !== $project ) {
 					continue;
 				}
 
-				$updatedMs = self::parseIsoMs( $summary['updated_at'] ?? $summary['last_active_at'] ?? null );
-				$createdMs = self::parseIsoMs( $summary['created_at'] ?? null );
-
-				if ( ! $updatedMs && file_exists( $updatesFile ) ) {
-					$updatedMs = ( (int) @filemtime( $updatesFile ) ) * 1000;
-				}
-				if ( ! $createdMs ) {
-					$createdMs = $updatedMs;
-				}
-
-				$display = trim( (string) ( $summary['generated_title'] ?? $summary['session_summary'] ?? '' ) );
-				$size    = file_exists( $updatesFile )
-					? (int) @filesize( $updatesFile )
-					: (int) @filesize( $summaryFile );
-
-				$out[] = [
-					'id'          => $id,
-					'display'     => $display,
-					'timestamp'   => $updatedMs,
-					'timestamp_s' => (int) floor( $updatedMs / 1000 ),
-					'project'     => $path,
-					'projectName' => $name,
-					'size'        => $size,
-					'created'     => $createdMs,
-					'model'       => $summary['current_model_id'] ?? '',
-				];
+				$out[] = self::sessionRecord( $sessionDir, $summary, $path, true );
 			}
 		}
 
 		usort( $out, fn( $a, $b ) => $b['timestamp'] <=> $a['timestamp'] );
 		return $out;
+	}
+
+	/**
+	 * Single session by id (primary or subagent). Used by the session viewer
+	 * when the id is not in the flat list (children are nested, not top-level).
+	 */
+	public static function getSession( string $sessionId ): ?array {
+		$dir = self::findSessionDir( $sessionId );
+		if ( ! $dir ) {
+			return null;
+		}
+		$summary = self::readJson( $dir . '/summary.json' ) ?: [];
+		$path    = $summary['info']['cwd'] ?? self::resolveProjectPath( dirname( $dir ) );
+		$includeChildren = ! self::isSubagentSession( $summary );
+		$record = self::sessionRecord( $dir, $summary, $path, $includeChildren );
+		if ( self::isSubagentSession( $summary ) ) {
+			$parent = self::findParentSessionId( $sessionId );
+			if ( $parent ) {
+				$record['parent_id'] = $parent;
+			}
+			$record['is_subagent'] = true;
+		}
+		return $record;
 	}
 
 	public static function listProjects(): array {
@@ -720,6 +718,129 @@ class GrokSessions {
 	 */
 	private static function isSubagentSession( array $summary ): bool {
 		return ( $summary['session_kind'] ?? '' ) === 'subagent';
+	}
+
+	/**
+	 * Build a list/detail session record. When $includeChildren is true, attach
+	 * subagent meta entries as children[] (clickable nested sessions).
+	 */
+	private static function sessionRecord( string $sessionDir, array $summary, string $path, bool $includeChildren ): array {
+		$id          = basename( $sessionDir );
+		$summaryFile = $sessionDir . '/summary.json';
+		$updatesFile = $sessionDir . '/updates.jsonl';
+
+		$updatedMs = self::parseIsoMs( $summary['updated_at'] ?? $summary['last_active_at'] ?? null );
+		$createdMs = self::parseIsoMs( $summary['created_at'] ?? null );
+		if ( ! $updatedMs && file_exists( $updatesFile ) ) {
+			$updatedMs = ( (int) @filemtime( $updatesFile ) ) * 1000;
+		}
+		if ( ! $createdMs ) {
+			$createdMs = $updatedMs;
+		}
+
+		$display = trim( (string) ( $summary['generated_title'] ?? $summary['session_summary'] ?? '' ) );
+		$size    = file_exists( $updatesFile )
+			? (int) @filesize( $updatesFile )
+			: (int) @filesize( $summaryFile );
+
+		$record = [
+			'id'          => $id,
+			'display'     => $display,
+			'timestamp'   => $updatedMs,
+			'timestamp_s' => (int) floor( $updatedMs / 1000 ),
+			'project'     => $path,
+			'projectName' => $path !== '' ? self::projectDisplayName( $path ) : '',
+			'size'        => $size,
+			'created'     => $createdMs,
+			'model'       => $summary['current_model_id'] ?? '',
+		];
+
+		if ( $includeChildren ) {
+			$children = self::listSubagents( $sessionDir );
+			if ( $children ) {
+				$record['children']       = $children;
+				$record['subagent_count'] = count( $children );
+			}
+		}
+
+		return $record;
+	}
+
+	/**
+	 * Read subagents/<id>/meta.json for a parent session directory.
+	 *
+	 * @return array<int,array{id:string,display:string,status:string,subagent_type:string,duration_ms:?int,tool_calls:?int,timestamp:int,timestamp_s:int,model:string}>
+	 */
+	private static function listSubagents( string $sessionDir ): array {
+		$subRoot = $sessionDir . '/subagents';
+		if ( ! is_dir( $subRoot ) ) {
+			return [];
+		}
+
+		$out = [];
+		foreach ( glob( $subRoot . '/*', GLOB_ONLYDIR ) ?: [] as $childDir ) {
+			$meta = self::readJson( $childDir . '/meta.json' );
+			if ( ! is_array( $meta ) ) {
+				continue;
+			}
+			$id = (string) ( $meta['child_session_id'] ?? $meta['subagent_id'] ?? basename( $childDir ) );
+			if ( ! self::isValidSessionId( $id ) ) {
+				continue;
+			}
+
+			$display = trim( (string) ( $meta['description'] ?? '' ) );
+			// Prefer the child's generated title when description is thin.
+			if ( $display === '' || strlen( $display ) < 8 ) {
+				$childDirFull = self::findSessionDir( $id );
+				if ( $childDirFull ) {
+					$childSummary = self::readJson( $childDirFull . '/summary.json' ) ?: [];
+					$title        = trim( (string) ( $childSummary['generated_title'] ?? $childSummary['session_summary'] ?? '' ) );
+					if ( $title !== '' ) {
+						$display = $title;
+					}
+				}
+			}
+			if ( $display === '' ) {
+				$display = $id;
+			}
+
+			$startedMs   = self::parseIsoMs( $meta['started_at'] ?? null );
+			$completedMs = self::parseIsoMs( $meta['completed_at'] ?? null );
+			$ts          = $completedMs ?: $startedMs;
+
+			$out[] = [
+				'id'            => $id,
+				'display'       => $display,
+				'status'        => (string) ( $meta['status'] ?? '' ),
+				'subagent_type' => (string) ( $meta['subagent_type'] ?? '' ),
+				'duration_ms'   => isset( $meta['duration_ms'] ) ? (int) $meta['duration_ms'] : null,
+				'tool_calls'    => isset( $meta['tool_calls'] ) ? (int) $meta['tool_calls'] : null,
+				'timestamp'     => $ts,
+				'timestamp_s'   => (int) floor( $ts / 1000 ),
+				'model'         => (string) ( $meta['effective_model_id'] ?? '' ),
+			];
+		}
+
+		usort( $out, fn( $a, $b ) => ( $b['timestamp'] ?? 0 ) <=> ( $a['timestamp'] ?? 0 ) );
+		return $out;
+	}
+
+	/**
+	 * Locate parent session id for a child via:
+	 *   sessions/<encoded-cwd>/<parent>/subagents/<child>/meta.json
+	 */
+	private static function findParentSessionId( string $childId ): ?string {
+		if ( ! self::isValidSessionId( $childId ) ) {
+			return null;
+		}
+		// Path: .../<parent>/subagents/<childId>/meta.json
+		$matches = glob( self::sessionsDir() . '/*/*/subagents/' . $childId . '/meta.json' );
+		if ( ! $matches ) {
+			return null;
+		}
+		$parentDir = dirname( dirname( dirname( $matches[0] ) ) );
+		$id        = basename( $parentDir );
+		return self::isValidSessionId( $id ) ? $id : null;
 	}
 
 	/**

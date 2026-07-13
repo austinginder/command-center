@@ -23,6 +23,21 @@ if ( $method === 'GET' && $path === '/sessions' ) {
 	exit;
 }
 
+// GET /api/sessions/{id} - single session meta (incl. nested subagents / parent link)
+if ( $method === 'GET' && preg_match( '#^/sessions/([A-Za-z0-9_-]+)$#', $path, $m ) ) {
+	$source  = $_GET['source'] ?? null;
+	$session = SessionRegistry::getSession( $m[1], $source ?: null );
+	if ( ! $session ) {
+		http_response_code( 404 );
+		echo json_encode( [ 'error' => 'Session not found' ] );
+		exit;
+	}
+	// Annotate retention on the parent record only (children inherit policy via source).
+	$annotated = Retention::annotateSessions( [ $session ] );
+	echo json_encode( $annotated[0] ?? $session );
+	exit;
+}
+
 // GET /api/retention - per-provider retention policies + at-risk stats
 if ( $method === 'GET' && $path === '/retention' ) {
 	// Reuse the session list so stats match the dashboard.

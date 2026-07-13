@@ -77,6 +77,96 @@ class SessionRegistry {
 	}
 
 	/**
+	 * Look up a single session by id (and optional source). Falls back to
+	 * probing providers. Used for session viewer meta when the id is a nested
+	 * subagent not present in the flat list.
+	 */
+	public static function getSession( string $sessionId, ?string $source = null ): ?array {
+		$providers = self::providers();
+		if ( $source && isset( $providers[ $source ] ) ) {
+			$class = $providers[ $source ];
+			if ( method_exists( $class, 'getSession' ) ) {
+				try {
+					$s = $class::getSession( $sessionId );
+					if ( $s ) {
+						$s['source']      = $source;
+						$s['sourceLabel'] = $class::sourceLabel();
+						return $s;
+					}
+				} catch ( \Throwable $e ) {
+					// fall through
+				}
+			}
+			// Fallback: scan that provider's list (and nested children).
+			try {
+				foreach ( $class::listSessions() as $s ) {
+					if ( ( $s['id'] ?? '' ) === $sessionId ) {
+						$s['source']      = $source;
+						$s['sourceLabel'] = $class::sourceLabel();
+						return $s;
+					}
+					foreach ( $s['children'] ?? [] as $child ) {
+						if ( ( $child['id'] ?? '' ) === $sessionId ) {
+							$child['source']      = $source;
+							$child['sourceLabel'] = $class::sourceLabel();
+							$child['project']     = $child['project'] ?? $s['project'] ?? '';
+							$child['projectName'] = $child['projectName'] ?? $s['projectName'] ?? '';
+							$child['parent_id']   = $s['id'];
+							$child['is_subagent'] = true;
+							return $child;
+						}
+					}
+				}
+			} catch ( \Throwable $e ) {
+				// fall through
+			}
+		}
+
+		$detected = self::detectSource( $sessionId );
+		if ( $detected && $detected !== $source ) {
+			return self::getSession( $sessionId, $detected );
+		}
+
+		// Last resort: walk all providers' lists + nested children.
+		foreach ( $providers as $id => $class ) {
+			if ( $source && $source !== $id ) {
+				continue;
+			}
+			try {
+				if ( method_exists( $class, 'getSession' ) ) {
+					$s = $class::getSession( $sessionId );
+					if ( $s ) {
+						$s['source']      = $id;
+						$s['sourceLabel'] = $class::sourceLabel();
+						return $s;
+					}
+				}
+				foreach ( $class::listSessions() as $s ) {
+					if ( ( $s['id'] ?? '' ) === $sessionId ) {
+						$s['source']      = $id;
+						$s['sourceLabel'] = $class::sourceLabel();
+						return $s;
+					}
+					foreach ( $s['children'] ?? [] as $child ) {
+						if ( ( $child['id'] ?? '' ) === $sessionId ) {
+							$child['source']      = $id;
+							$child['sourceLabel'] = $class::sourceLabel();
+							$child['project']     = $child['project'] ?? $s['project'] ?? '';
+							$child['projectName'] = $child['projectName'] ?? $s['projectName'] ?? '';
+							$child['parent_id']   = $s['id'];
+							$child['is_subagent'] = true;
+							return $child;
+						}
+					}
+				}
+			} catch ( \Throwable $e ) {
+				continue;
+			}
+		}
+		return null;
+	}
+
+	/**
 	 * List sessions across providers, tagged with source.
 	 * Pass $source to restrict to one provider.
 	 */

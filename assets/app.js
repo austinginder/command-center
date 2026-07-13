@@ -195,6 +195,25 @@ function formatRetentionDays(days) {
     return days + 'd';
 }
 
+function formatDurationMs(ms) {
+    if (ms === null || ms === undefined || ms < 0) return '';
+    const s = Math.round(ms / 1000);
+    if (s < 60) return s + 's';
+    const m = Math.floor(s / 60);
+    const rem = s % 60;
+    if (m < 60) return rem ? `${m}m ${rem}s` : `${m}m`;
+    const h = Math.floor(m / 60);
+    return `${h}h ${m % 60}m`;
+}
+
+function subagentStatusDot(status) {
+    const s = (status || '').toLowerCase();
+    if (s === 'completed' || s === 'done') return 'bg-emerald-500';
+    if (s === 'failed' || s === 'error') return 'bg-red-500';
+    if (s === 'running' || s === 'in_progress') return 'bg-amber-400 animate-pulse';
+    return 'bg-zinc-400';
+}
+
 // CLI resume recipes per source. Sources absent here can't be resumed.
 const RESUME_BINS = {
 	amp:         { bin: 'amp',    flag: '',                               resume: 'threads continue' },
@@ -414,6 +433,7 @@ function renderDashboard() {
     let sessionsLoaded = false; // first /api/sessions fetch has resolved
     let retentionReport = null; // GET /api/retention payload
     let expiringOnly = false;   // filter to at-risk sessions
+    let expandedParents = new Set(); // session ids with open subagent lists
 
     const searchInput = document.getElementById('session-search');
     const projectInput = document.getElementById('project-filter-input');
@@ -934,17 +954,50 @@ function renderDashboard() {
     function rowHtml(s) {
         const title = s.display || s.id;
         const src = s.source || 'claude';
-        return `
-        <div class="session-row group flex items-center gap-3 px-4 py-2 cursor-pointer border-t border-zinc-100 dark:border-cc-line2 hover:bg-zinc-50 dark:hover:bg-cc-panel"
+        const children = Array.isArray(s.children) ? s.children : [];
+        const n = children.length || s.subagent_count || 0;
+        const expanded = expandedParents.has(s.id);
+        const chevron = n > 0
+            ? `<button type="button" class="subagent-toggle shrink-0 p-0.5 rounded text-zinc-400 dark:text-cc-dim hover:text-zinc-700 dark:hover:text-cc-soft" data-parent-id="${esc(s.id)}" title="${expanded ? 'Collapse' : 'Expand'} ${n} subagent${n === 1 ? '' : 's'}" aria-expanded="${expanded ? 'true' : 'false'}">
+                <svg class="w-3.5 h-3.5 transition-transform ${expanded ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+               </button>`
+            : `<span class="w-4 shrink-0"></span>`;
+        const countBadge = n > 0
+            ? `<span class="shrink-0 text-[10px] font-mono px-1.5 py-0.5 rounded border border-zinc-200 dark:border-cc-line3 text-zinc-500 dark:text-cc-dim">${n} agent${n === 1 ? '' : 's'}</span>`
+            : '';
+
+        let html = `
+        <div class="session-row group flex items-center gap-2 sm:gap-3 px-4 py-2 cursor-pointer border-t border-zinc-100 dark:border-cc-line2 hover:bg-zinc-50 dark:hover:bg-cc-panel"
              data-session-id="${esc(s.id)}" data-source="${esc(src)}">
+            ${chevron}
             ${sourceBadge(src, s.sourceLabel)}
             <span class="flex-1 min-w-0 truncate text-sm text-zinc-800 dark:text-cc-ink" title="${esc(title)}">${esc(title)}</span>
+            ${countBadge}
             ${retentionBadge(s, showRetentionBadges())}
             <span class="hidden md:block max-w-[240px] truncate text-xs font-mono text-zinc-400 dark:text-cc-dim" title="${esc(shortPath(s.project) || '')}">${esc(projectLabel(s.project) || s.projectName || '')}</span>
             <span class="hidden sm:block w-20 text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap">${s.size ? formatBytes(s.size) : ''}</span>
             <span class="text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap" style="width:4.5rem">${s.timestamp_s ? clockTime(s.timestamp_s) : ''}</span>
             ${copyBtnHtml(src, s.project, s.id)}
         </div>`;
+
+        if (expanded && children.length) {
+            children.forEach(c => {
+                const cTitle = c.display || c.id;
+                const dur = formatDurationMs(c.duration_ms);
+                const tools = c.tool_calls != null ? c.tool_calls + ' tools' : '';
+                const meta = [c.subagent_type, c.status, dur, tools].filter(Boolean).join(' · ');
+                html += `
+                <div class="session-row session-row-child group flex items-center gap-2 sm:gap-3 pl-10 pr-4 py-1.5 cursor-pointer border-t border-zinc-50 dark:border-cc-line2 hover:bg-zinc-50 dark:hover:bg-cc-panel"
+                     data-session-id="${esc(c.id)}" data-source="${esc(src)}" data-parent-id="${esc(s.id)}">
+                    <span class="w-1.5 h-1.5 rounded-full shrink-0 ${subagentStatusDot(c.status)}" title="${esc(c.status || '')}"></span>
+                    <span class="flex-1 min-w-0 truncate text-[13px] text-zinc-600 dark:text-cc-mut" title="${esc(cTitle)}">${esc(cTitle)}</span>
+                    <span class="hidden sm:block max-w-[220px] truncate text-[11px] font-mono text-zinc-400 dark:text-cc-dim">${esc(meta)}</span>
+                    <span class="text-right text-[11px] font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap" style="width:4.5rem">${c.timestamp_s ? clockTime(c.timestamp_s) : ''}</span>
+                    ${copyBtnHtml(src, s.project, c.id)}
+                </div>`;
+            });
+        }
+        return html;
     }
 
     function dayHeaderHtml(label, count) {
@@ -1086,9 +1139,21 @@ function renderDashboard() {
     }
 
     function wireRows(container) {
+        container.querySelectorAll('.subagent-toggle').forEach(btn => {
+            btn.addEventListener('click', e => {
+                e.stopPropagation();
+                e.preventDefault();
+                const id = btn.dataset.parentId;
+                if (!id) return;
+                if (expandedParents.has(id)) expandedParents.delete(id);
+                else expandedParents.add(id);
+                renderList();
+            });
+        });
         container.querySelectorAll('.session-row').forEach(row => {
             row.addEventListener('click', e => {
                 if (e.target.closest('.copy-resume-btn')) return;
+                if (e.target.closest('.subagent-toggle')) return;
                 const src = row.dataset.source || '';
                 navigate('/sessions/' + row.dataset.sessionId + (src ? '?source=' + encodeURIComponent(src) : ''));
             });
@@ -1617,6 +1682,7 @@ function renderSessionView(sessionId) {
                     <span class="resume-icon">${ICON_COPY}</span> Copy resume
                 </button>
             </div>
+            <div id="session-children" class="hidden bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm overflow-hidden"></div>
             <div id="session-log" class="bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm px-4 sm:px-6 py-5 space-y-1 text-sm"></div>
         </div>
     `;
@@ -1631,13 +1697,41 @@ function renderSessionView(sessionId) {
         }
     });
 
-    // Fetch session metadata (scoped to source when we know it) for title/meta/resume.
-    const metaUrl = '/api/sessions' + (source ? '?source=' + encodeURIComponent(source) : '');
+    function renderSessionChildren(s) {
+        const el = document.getElementById('session-children');
+        if (!el) return;
+        const children = Array.isArray(s.children) ? s.children : [];
+        if (!children.length) {
+            el.classList.add('hidden');
+            el.innerHTML = '';
+            return;
+        }
+        const src = s.source || source || '';
+        let html = `<div class="px-4 py-2.5 border-b border-zinc-100 dark:border-cc-line2 flex items-center justify-between">
+            <span class="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-cc-dim">Subagents</span>
+            <span class="text-[11px] font-mono text-zinc-400 dark:text-cc-dim">${children.length}</span>
+        </div>`;
+        children.forEach(c => {
+            const cTitle = c.display || c.id;
+            const dur = formatDurationMs(c.duration_ms);
+            const meta = [c.subagent_type, c.status, dur, c.tool_calls != null ? c.tool_calls + ' tools' : ''].filter(Boolean).join(' · ');
+            html += `<a href="/sessions/${esc(c.id)}${src ? '?source=' + encodeURIComponent(src) : ''}" data-route
+                class="flex items-center gap-2.5 px-4 py-2 border-t border-zinc-50 dark:border-cc-line2 hover:bg-zinc-50 dark:hover:bg-cc-panel text-sm">
+                <span class="w-1.5 h-1.5 rounded-full shrink-0 ${subagentStatusDot(c.status)}"></span>
+                <span class="flex-1 min-w-0 truncate text-zinc-700 dark:text-cc-soft" title="${esc(cTitle)}">${esc(cTitle)}</span>
+                <span class="hidden sm:block max-w-[240px] truncate text-[11px] font-mono text-zinc-400 dark:text-cc-dim">${esc(meta)}</span>
+            </a>`;
+        });
+        el.innerHTML = html;
+        el.classList.remove('hidden');
+    }
+
+    // Fetch session metadata via single-session endpoint (works for nested subagents).
+    const metaUrl = '/api/sessions/' + encodeURIComponent(sessionId) + (source ? '?source=' + encodeURIComponent(source) : '');
     fetch(metaUrl)
-        .then(r => r.json())
-        .then(sessions => {
-            const s = sessions.find(s => s.id === sessionId);
-            if (!s) return;
+        .then(r => r.ok ? r.json() : null)
+        .then(s => {
+            if (!s || s.error) return;
 
             const title = document.getElementById('session-title');
             if (title && s.display) title.textContent = s.display;
@@ -1648,10 +1742,27 @@ function renderSessionView(sessionId) {
             const meta = document.getElementById('session-meta');
             if (meta) {
                 const parts = [];
+                if (s.is_subagent || s.parent_id) parts.push('subagent');
                 if (s.project || s.projectName) parts.push(projectLabel(s.project) || s.projectName);
                 if (s.timestamp_s) parts.push(new Date(s.timestamp_s * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }));
                 if (s.size) parts.push(formatBytes(s.size));
+                if (s.parent_id) parts.push('parent ' + s.parent_id.slice(0, 8));
                 meta.textContent = parts.join(' · ');
+            }
+
+            renderSessionChildren(s);
+
+            // Parent link for subagent sessions.
+            if (s.parent_id) {
+                const wrap = document.getElementById('session-meta');
+                if (wrap) {
+                    const a = document.createElement('a');
+                    a.href = '/sessions/' + s.parent_id + (s.source ? '?source=' + encodeURIComponent(s.source) : '');
+                    a.setAttribute('data-route', '');
+                    a.className = 'ml-2 text-xs font-mono text-emerald-600 dark:text-emerald-400 hover:underline';
+                    a.textContent = 'view parent';
+                    wrap.appendChild(a);
+                }
             }
 
             const cmd = resumeCommand(s.source, s.project, sessionId);
