@@ -42,6 +42,7 @@ require BASE_DIR . '/app/KimiSessions.php';
 require BASE_DIR . '/app/AntigravitySessions.php';
 require BASE_DIR . '/app/GrokSessions.php';
 require BASE_DIR . '/app/SessionRegistry.php';
+require BASE_DIR . '/app/Retention.php';
 require BASE_DIR . '/app/SearchIndex.php';
 require BASE_DIR . '/app/FlowExtractor.php';
 

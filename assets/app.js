@@ -165,6 +165,34 @@ function sourceBadge(source, label) {
     return `<span class="inline-block shrink-0 text-[11px] font-mono font-medium px-1.5 py-0.5 rounded border ${colors}" title="${esc(label || source)}">${esc(source)}</span>`;
 }
 
+/** Predicted expiry chip for providers with a known day TTL (e.g. Claude). */
+function retentionBadge(s, showBadges) {
+    if (!showBadges || s.days_left === undefined || s.days_left === null) return '';
+    const left = Number(s.days_left);
+    const risk = s.retention_risk || 'ok';
+    // Only surface sessions inside the warning window (or worse) on the row.
+    if (risk === 'ok') return '';
+    let label;
+    if (left < 0) label = 'expired';
+    else if (left === 0) label = 'expires today';
+    else if (left === 1) label = 'expires tomorrow';
+    else label = `expires ${left}d`;
+    const cls = risk === 'expired' || risk === 'critical'
+        ? 'ret-badge ret-badge-crit'
+        : 'ret-badge ret-badge-warn';
+    const title = s.expires_at
+        ? `Predicted expiry ${new Date(s.expires_at * 1000).toLocaleDateString()} (last activity + retention)`
+        : 'Predicted expiry from last activity + provider retention';
+    return `<span class="${cls}" title="${esc(title)}">${esc(label)}</span>`;
+}
+
+function formatRetentionDays(days) {
+    if (days === null || days === undefined) return '-';
+    if (days >= 3650) return Math.round(days / 365) + 'y';
+    if (days >= 365) return (days / 365).toFixed(days % 365 === 0 ? 0 : 1) + 'y';
+    return days + 'd';
+}
+
 // CLI resume recipes per source. Sources absent here can't be resumed.
 const RESUME_BINS = {
 	amp:         { bin: 'amp',    flag: '',                               resume: 'threads continue' },
@@ -319,6 +347,50 @@ function renderDashboard() {
                 </div>
             </div>
 
+            <!-- Retention monitor -->
+            <div id="retention-strip" class="hidden bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm px-4 py-3">
+                <div class="flex items-start justify-between gap-3 mb-2">
+                    <div>
+                        <div class="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-cc-dim">Retention</div>
+                        <div id="retention-summary" class="text-[11px] font-mono text-zinc-500 dark:text-cc-mut mt-0.5"></div>
+                    </div>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <button type="button" id="retention-expiring-btn" class="hidden text-[11px] font-mono px-2 py-1 rounded-lg border border-amber-500/30 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10 transition-colors">Expiring soon</button>
+                        <button type="button" id="retention-config-btn" class="text-[11px] font-mono px-2 py-1 rounded-lg border border-zinc-200 dark:border-cc-line text-zinc-500 dark:text-cc-mut hover:text-zinc-800 dark:hover:text-cc-soft transition-colors">Configure</button>
+                    </div>
+                </div>
+                <div id="retention-rows" class="space-y-1.5"></div>
+            </div>
+
+            <!-- Retention prefs modal -->
+            <div id="retention-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+                <div id="retention-modal-backdrop" class="absolute inset-0 bg-black/40 dark:bg-black/60"></div>
+                <div class="relative w-full max-w-md rounded-xl border border-zinc-200 dark:border-cc-line3 bg-white dark:bg-cc-card shadow-2xl p-5">
+                    <h2 class="text-sm font-semibold text-zinc-900 dark:text-cc-bright">Retention monitor</h2>
+                    <p class="mt-1 text-xs text-zinc-500 dark:text-cc-mut leading-relaxed">
+                        Command Center predicts when agent cleanup will delete local transcripts.
+                        Warning prefs stay in Command Center only - they do not change agent settings.
+                    </p>
+                    <label class="mt-4 block text-xs font-medium text-zinc-600 dark:text-cc-soft">
+                        Warn when a session has this many days left
+                        <input type="number" id="retention-warn-input" min="1" max="3650" class="mt-1.5 w-full rounded-lg border border-zinc-200 dark:border-cc-line bg-white dark:bg-cc-panel text-sm text-zinc-900 dark:text-cc-ink px-3 py-2 font-mono">
+                    </label>
+                    <label class="mt-3 flex items-center gap-2 text-xs text-zinc-600 dark:text-cc-soft cursor-pointer">
+                        <input type="checkbox" id="retention-show-strip" class="rounded border-zinc-300 dark:border-cc-line">
+                        Show retention strip on dashboard
+                    </label>
+                    <label class="mt-2 flex items-center gap-2 text-xs text-zinc-600 dark:text-cc-soft cursor-pointer">
+                        <input type="checkbox" id="retention-show-badges" class="rounded border-zinc-300 dark:border-cc-line">
+                        Show expiry badges on session rows
+                    </label>
+                    <div id="retention-modal-error" class="hidden mt-3 text-xs text-red-600 dark:text-red-400"></div>
+                    <div class="mt-5 flex justify-end gap-2">
+                        <button type="button" id="retention-modal-cancel" class="px-3 py-1.5 text-xs font-medium rounded-lg border border-zinc-200 dark:border-cc-line text-zinc-600 dark:text-cc-mut hover:bg-zinc-50 dark:hover:bg-cc-panel">Cancel</button>
+                        <button type="button" id="retention-modal-save" class="px-3 py-1.5 text-xs font-medium rounded-lg bg-zinc-900 text-white dark:bg-cc-ink dark:text-cc-bg">Save</button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Sessions -->
             <div id="sessions-list" class="bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm overflow-hidden">
                 ${emptyState(illoRadar('w-16 h-16'), 'scanning', 'loading session archives')}
@@ -337,6 +409,8 @@ function renderDashboard() {
     let allProjects = [];      // [{path, name, sessions, latest}]
     let activeProject = '';    // project path filter ('' = all)
     let sessionsLoaded = false; // first /api/sessions fetch has resolved
+    let retentionReport = null; // GET /api/retention payload
+    let expiringOnly = false;   // filter to at-risk sessions
 
     const searchInput = document.getElementById('session-search');
     const projectInput = document.getElementById('project-filter-input');
@@ -348,6 +422,7 @@ function renderDashboard() {
     const initialProject = urlParams.get('project') || '';
     activeSource = urlParams.get('source') || '';
     dayFilter = urlParams.get('day') || '';
+    expiringOnly = urlParams.get('expiring') === '1';
 
     function updateURL() {
         const params = new URLSearchParams();
@@ -357,6 +432,7 @@ function renderDashboard() {
         if (activeProject) params.set('project', activeProject);
         if (activeSource) params.set('source', activeSource);
         if (dayFilter) params.set('day', dayFilter);
+        if (expiringOnly) params.set('expiring', '1');
         const qs = params.toString();
         history.replaceState(null, '', '/' + (qs ? '?' + qs : ''));
     }
@@ -366,6 +442,137 @@ function renderDashboard() {
         try {
             sources = await (await fetch('/api/sessions/sources')).json();
         } catch (err) { sources = []; }
+    }
+
+    async function loadRetention() {
+        try {
+            retentionReport = await (await fetch('/api/retention')).json();
+        } catch (err) {
+            retentionReport = null;
+        }
+        renderRetentionStrip();
+        renderList(); // badges depend on prefs
+    }
+
+    function renderRetentionStrip() {
+        const strip = document.getElementById('retention-strip');
+        const rowsEl = document.getElementById('retention-rows');
+        const summaryEl = document.getElementById('retention-summary');
+        const expBtn = document.getElementById('retention-expiring-btn');
+        if (!strip || !rowsEl || !retentionReport) return;
+
+        const prefs = retentionReport.prefs || {};
+        if (prefs.show_strip === false) {
+            strip.classList.add('hidden');
+            return;
+        }
+        strip.classList.remove('hidden');
+
+        const warn = prefs.warning_days ?? 7;
+        const providers = retentionReport.providers || [];
+        const withSessions = providers.filter(p => (p.stats && p.stats.total > 0) || p.kind === 'days');
+        const atRisk = retentionReport.at_risk || 0;
+
+        if (summaryEl) {
+            summaryEl.textContent = atRisk
+                ? `${atRisk} session${atRisk === 1 ? '' : 's'} within ${warn}d warning window`
+                : `No sessions inside ${warn}d warning window`;
+        }
+        if (expBtn) {
+            if (atRisk > 0) {
+                expBtn.classList.remove('hidden');
+                expBtn.textContent = expiringOnly ? 'Show all' : `Expiring soon (${atRisk})`;
+                expBtn.classList.toggle('ret-expiring-active', expiringOnly);
+            } else {
+                expBtn.classList.add('hidden');
+            }
+        }
+
+        // Prefer providers with day TTL first, then the rest that have sessions.
+        const ordered = [...withSessions].sort((a, b) => {
+            const aDays = a.kind === 'days' ? 0 : 1;
+            const bDays = b.kind === 'days' ? 0 : 1;
+            if (aDays !== bDays) return aDays - bDays;
+            return (b.stats?.total || 0) - (a.stats?.total || 0);
+        });
+
+        rowsEl.innerHTML = ordered.map(p => {
+            const total = p.stats?.total || 0;
+            let policyLabel;
+            let riskCls = 'ret-pol-ok';
+            if (p.kind === 'days') {
+                const srcNote = p.source === 'default' ? 'default' : 'configured';
+                policyLabel = `${formatRetentionDays(p.days)} (${srcNote})`;
+                if ((p.stats?.critical || 0) > 0 || (p.stats?.expired || 0) > 0) riskCls = 'ret-pol-crit';
+                else if ((p.stats?.expiring || 0) > 0) riskCls = 'ret-pol-warn';
+            } else if (p.kind === 'none') {
+                policyLabel = 'no auto-delete';
+            } else {
+                policyLabel = 'unknown';
+            }
+
+            let tail = `${total} session${total === 1 ? '' : 's'}`;
+            if (p.kind === 'days' && (p.stats?.expiring || 0) > 0) {
+                tail += ` · ${p.stats.expiring} at risk`;
+            } else if (p.kind === 'days' && p.stats?.soonest !== null && p.stats?.soonest !== undefined) {
+                const s = p.stats.soonest;
+                tail += s < 0 ? ' · oldest past cutoff' : ` · soonest ${s}d`;
+            }
+
+            const note = p.note ? ` title="${esc(p.note)}"` : '';
+            return `<div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] font-mono"${note}>
+                <span class="inline-flex items-center gap-1.5 min-w-[7.5rem]">
+                    <span class="w-1.5 h-1.5 rounded-full ${SOURCE_DOTS[p.id] || 'bg-zinc-400'}"></span>
+                    <span class="text-zinc-700 dark:text-cc-soft">${esc(p.label || p.id)}</span>
+                </span>
+                <span class="${riskCls}">${esc(policyLabel)}</span>
+                <span class="text-zinc-400 dark:text-cc-dim">${esc(tail)}</span>
+            </div>`;
+        }).join('');
+    }
+
+    function openRetentionModal() {
+        const modal = document.getElementById('retention-modal');
+        if (!modal || !retentionReport) return;
+        const prefs = retentionReport.prefs || {};
+        document.getElementById('retention-warn-input').value = prefs.warning_days ?? 7;
+        document.getElementById('retention-show-strip').checked = prefs.show_strip !== false;
+        document.getElementById('retention-show-badges').checked = prefs.show_badges !== false;
+        document.getElementById('retention-modal-error').classList.add('hidden');
+        modal.classList.remove('hidden');
+    }
+
+    function closeRetentionModal() {
+        const modal = document.getElementById('retention-modal');
+        if (modal) modal.classList.add('hidden');
+    }
+
+    async function saveRetentionPrefs() {
+        const errEl = document.getElementById('retention-modal-error');
+        const days = parseInt(document.getElementById('retention-warn-input').value, 10);
+        const body = {
+            warning_days: Number.isFinite(days) ? days : 7,
+            show_strip: document.getElementById('retention-show-strip').checked,
+            show_badges: document.getElementById('retention-show-badges').checked,
+        };
+        try {
+            const res = await fetch('/api/retention/preferences', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Save failed');
+            closeRetentionModal();
+            // Re-annotate via reload so days_left risk bands match new warning window.
+            await loadSessions();
+            await loadRetention();
+        } catch (err) {
+            if (errEl) {
+                errEl.textContent = err.message || 'Save failed';
+                errEl.classList.remove('hidden');
+            }
+        }
     }
 
     async function loadProjects() {
@@ -688,10 +895,22 @@ function renderDashboard() {
     }
 
     // ── List rendering ──
+    function warningDays() {
+        return retentionReport?.prefs?.warning_days ?? 7;
+    }
+
+    function showRetentionBadges() {
+        return retentionReport?.prefs?.show_badges !== false;
+    }
+
     function visibleSessions() {
         let list = allSessions;
         if (activeSource) list = list.filter(s => s.source === activeSource);
         if (dayFilter) list = list.filter(s => s.timestamp_s && localDayKey(new Date(s.timestamp_s * 1000)) === dayFilter);
+        if (expiringOnly) {
+            const w = warningDays();
+            list = list.filter(s => s.days_left !== undefined && s.days_left !== null && Number(s.days_left) <= w);
+        }
         const q = searchInput.value.trim().toLowerCase();
         if (q) {
             list = list.filter(s =>
@@ -717,6 +936,7 @@ function renderDashboard() {
              data-session-id="${esc(s.id)}" data-source="${esc(src)}">
             ${sourceBadge(src, s.sourceLabel)}
             <span class="flex-1 min-w-0 truncate text-sm text-zinc-800 dark:text-cc-ink" title="${esc(title)}">${esc(title)}</span>
+            ${retentionBadge(s, showRetentionBadges())}
             <span class="hidden md:block max-w-[240px] truncate text-xs font-mono text-zinc-400 dark:text-cc-dim" title="${esc(shortPath(s.project) || '')}">${esc(projectLabel(s.project) || s.projectName || '')}</span>
             <span class="hidden sm:block w-20 text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap">${s.size ? formatBytes(s.size) : ''}</span>
             <span class="text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap" style="width:4.5rem">${s.timestamp_s ? clockTime(s.timestamp_s) : ''}</span>
@@ -744,6 +964,12 @@ function renderDashboard() {
             dayBanner = `<div class="px-4 py-2 bg-emerald-500/10 text-xs font-mono text-emerald-600 dark:text-emerald-500 flex items-center justify-between">
                 <span>${list.length} session${list.length !== 1 ? 's' : ''} on ${esc(dayKeyLabel(dayFilter))}</span>
                 <button id="clear-day-filter" class="font-medium hover:underline">clear</button>
+            </div>`;
+        }
+        if (expiringOnly) {
+            dayBanner += `<div class="px-4 py-2 bg-amber-500/10 text-xs font-mono text-amber-700 dark:text-amber-400 flex items-center justify-between">
+                <span>${list.length} session${list.length !== 1 ? 's' : ''} expiring within ${warningDays()}d</span>
+                <button id="clear-expiring-filter" class="font-medium hover:underline">clear</button>
             </div>`;
         }
 
@@ -794,6 +1020,13 @@ function renderDashboard() {
             shown = PAGE_SIZE;
             updateURL();
             renderHeatmap();
+            renderList();
+        });
+        container.querySelector('#clear-expiring-filter')?.addEventListener('click', () => {
+            expiringOnly = false;
+            shown = PAGE_SIZE;
+            updateURL();
+            renderRetentionStrip();
             renderList();
         });
     }
@@ -984,6 +1217,18 @@ function renderDashboard() {
         }
     });
 
+    document.getElementById('retention-config-btn')?.addEventListener('click', openRetentionModal);
+    document.getElementById('retention-modal-cancel')?.addEventListener('click', closeRetentionModal);
+    document.getElementById('retention-modal-backdrop')?.addEventListener('click', closeRetentionModal);
+    document.getElementById('retention-modal-save')?.addEventListener('click', saveRetentionPrefs);
+    document.getElementById('retention-expiring-btn')?.addEventListener('click', () => {
+        expiringOnly = !expiringOnly;
+        shown = PAGE_SIZE;
+        updateURL();
+        renderRetentionStrip();
+        renderList();
+    });
+
     // ── Initial load ──
     if (initialQuery) searchInput.value = initialQuery;
     updateDeepSearchBtn();
@@ -1003,6 +1248,7 @@ function renderDashboard() {
         renderPills();
         renderList();
         loadDailyStats();
+        loadRetention();
         searchInput.focus();
         if (initialQuery && initialDeep) doDeepSearch();
     })();

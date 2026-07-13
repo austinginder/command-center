@@ -9,10 +9,44 @@ $path   = preg_replace( '#^/api#', '', $uri );
 $path   = rtrim( $path, '/' ) ?: '/';
 
 // GET /api/sessions - list sessions across providers (optionally filtered by source/project)
+// Optional: expiring=<days> keeps only sessions at risk within that window (incl. expired).
 if ( $method === 'GET' && $path === '/sessions' ) {
-	$project = $_GET['project'] ?? null;
-	$source  = $_GET['source']  ?? null;
-	echo json_encode( SessionRegistry::listSessions( $project ?: null, $source ?: null ) );
+	$project  = $_GET['project'] ?? null;
+	$source   = $_GET['source']  ?? null;
+	$expiring = isset( $_GET['expiring'] ) ? (int) $_GET['expiring'] : null;
+	$sessions = SessionRegistry::listSessions( $project ?: null, $source ?: null );
+	$sessions = Retention::annotateSessions( $sessions );
+	if ( $expiring !== null ) {
+		$sessions = Retention::expiringSessions( $sessions, max( 0, $expiring ) );
+	}
+	echo json_encode( $sessions );
+	exit;
+}
+
+// GET /api/retention - per-provider retention policies + at-risk stats
+if ( $method === 'GET' && $path === '/retention' ) {
+	// Reuse the session list so stats match the dashboard.
+	$sessions = SessionRegistry::listSessions();
+	echo json_encode( Retention::report( $sessions ) );
+	exit;
+}
+
+// PUT /api/retention/preferences - save CC-side warning prefs (data/retention.json)
+if ( $method === 'PUT' && $path === '/retention/preferences' ) {
+	$raw  = file_get_contents( 'php://input' );
+	$body = json_decode( $raw ?: '', true );
+	if ( ! is_array( $body ) ) {
+		http_response_code( 400 );
+		echo json_encode( [ 'error' => 'JSON body required' ] );
+		exit;
+	}
+	try {
+		$prefs = Retention::savePrefs( $body );
+		echo json_encode( [ 'ok' => true, 'prefs' => $prefs ] );
+	} catch ( \Throwable $e ) {
+		http_response_code( 500 );
+		echo json_encode( [ 'error' => $e->getMessage() ] );
+	}
 	exit;
 }
 
