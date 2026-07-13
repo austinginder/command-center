@@ -186,9 +186,14 @@ class OpenCodeSessions {
 
 		// Primary: the SQLite database. Superset of the legacy tree once
 		// OpenCode's own migration has run.
+		// Model from first message that carries model.modelID (user or assistant).
 		$rows = self::dbRows(
 			'SELECT s.id, s.title, s.slug, s.project_id, s.parent_id, s.time_created, s.time_updated,
 			        (SELECT COUNT(*) FROM message m WHERE m.session_id = s.id) AS messages,
+			        (SELECT json_extract(m.data, \'$.model.modelID\') FROM message m
+			          WHERE m.session_id = s.id
+			            AND json_extract(m.data, \'$.model.modelID\') IS NOT NULL
+			          ORDER BY m.time_created ASC LIMIT 1) AS model_id,
 			        p.worktree, p.name AS project_label
 			   FROM session s LEFT JOIN project p ON p.id = s.project_id'
 		);
@@ -213,6 +218,7 @@ class OpenCodeSessions {
 				'size'        => (int) $row['messages'],
 				'created'     => (int) ( $row['time_created'] ?: $updatedMs ),
 				'slug'        => $row['slug'] ?? '',
+				'model'       => trim( (string) ( $row['model_id'] ?? '' ) ),
 			];
 
 			$parentId = trim( (string) ( $row['parent_id'] ?? '' ) );

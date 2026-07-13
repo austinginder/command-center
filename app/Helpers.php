@@ -95,4 +95,26 @@ class Helpers {
 		}
 		return $current !== '' ? $current : $path;
 	}
+
+	/**
+	 * Short model label for session list chips.
+	 * "claude-opus-4-6" → "opus-4-6", "anthropic/claude-sonnet-4" → "sonnet-4",
+	 * "grok-4.5" stays "grok-4.5".
+	 */
+	public static function shortModelName( string $model ): string {
+		$raw = trim( $model );
+		if ( $raw === '' ) {
+			return '';
+		}
+		// provider/model → model
+		$name = str_contains( $raw, '/' ) ? substr( $raw, strrpos( $raw, '/' ) + 1 ) : $raw;
+		$name = preg_replace( '/\s+/', '-', $name ) ?? $name;
+		// Keep grok-* and gpt-* recognizable.
+		if ( preg_match( '/^(grok|gpt)[-_.]?/i', $name ) ) {
+			return strtolower( $name );
+		}
+		// Drop claude-/google-/gemini-/openai-/xai- prefixes.
+		$name = preg_replace( '/^(claude|google|gemini|openai|xai)[-_]/i', '', $name ) ?? $name;
+		return $name !== '' ? $name : $raw;
+	}
 }

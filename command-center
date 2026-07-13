@@ -219,7 +219,10 @@ function cmdReindex( bool $useJson ): void {
 	if ( $useJson ) {
 		echo json_encode( $result, JSON_PRETTY_PRINT ) . "\n";
 	} else {
-		echo "Indexed {$result['indexed']} sessions in {$result['elapsed_ms']}ms\n";
+		echo "Indexed {$result['indexed']} of {$result['listed']} sessions in {$result['elapsed_ms']}ms\n";
+		if ( ! empty( $result['skipped'] ) ) {
+			echo "Skipped {$result['skipped']} (no fingerprint / missing file)\n";
+		}
 		$status = SearchIndex::status();
 		echo "DB size: " . Helpers::formatBytes( $status['db_size_bytes'] ) . "\n";
 	}
@@ -227,7 +230,8 @@ function cmdReindex( bool $useJson ): void {
 }
 
 function cmdStatus( bool $useJson ): void {
-	$status = SearchIndex::status();
+	$sessions = SessionRegistry::listSessions();
+	$status   = SearchIndex::status( $sessions );
 
 	if ( $useJson ) {
 		echo json_encode( $status, JSON_PRETTY_PRINT ) . "\n";
@@ -235,7 +239,14 @@ function cmdStatus( bool $useJson ): void {
 	}
 
 	echo "Index status\n";
+	echo "  Sessions listed:  " . ( $status['listed'] ?? count( $sessions ) ) . "\n";
 	echo "  Sessions indexed: {$status['indexed']}\n";
+	if ( isset( $status['skipped'] ) ) {
+		echo "  Skipped:          {$status['skipped']} (no fingerprint)\n";
+	}
+	if ( isset( $status['stale'] ) ) {
+		echo "  Stale:            {$status['stale']} (need reindex)\n";
+	}
 	echo "  Database size:    " . Helpers::formatBytes( $status['db_size_bytes'] ) . "\n";
 	echo "  Last indexed:     " . ( $status['last_indexed'] ? Helpers::timeAgo( $status['last_indexed'] ) : 'never' ) . "\n";
 	exit( 0 );

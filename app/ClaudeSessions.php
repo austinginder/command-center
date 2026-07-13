@@ -345,6 +345,14 @@ class ClaudeSessions {
 				}
 			}
 
+			// Model from first assistant turn (cheap head scan).
+			if ( $file && file_exists( $file ) ) {
+				$model = self::peekSessionModel( $file );
+				if ( $model !== '' ) {
+					$s['model'] = $model;
+				}
+			}
+
 			$count = self::countSubagents( $s['id'], $s['project'] ?? '', $file );
 			if ( $count > 0 ) {
 				$s['subagent_count'] = $count;
@@ -1073,6 +1081,45 @@ class ClaudeSessions {
 			return $first;
 		}
 		return $current;
+	}
+
+	/**
+	 * First assistant message.model from the head of the transcript.
+	 * Claude usually writes this by line 2-5; stop early.
+	 */
+	private static function peekSessionModel( string $file ): string {
+		$fh = @fopen( $file, 'r' );
+		if ( ! $fh ) {
+			return '';
+		}
+		$maxLines = 40;
+		$n        = 0;
+		while ( ( $line = fgets( $fh ) ) !== false && $n < $maxLines ) {
+			$n++;
+			if ( ! str_contains( $line, '"model"' ) ) {
+				continue;
+			}
+			$obj = json_decode( trim( $line ), true );
+			if ( ! is_array( $obj ) ) {
+				continue;
+			}
+			// Assistant rows: message.model; some system/init rows put model at top level.
+			$model = '';
+			if ( ( $obj['type'] ?? '' ) === 'assistant' ) {
+				$model = (string) ( $obj['message']['model'] ?? $obj['model'] ?? '' );
+			} elseif ( ! empty( $obj['message']['model'] ) && is_string( $obj['message']['model'] ) ) {
+				$model = $obj['message']['model'];
+			} elseif ( ! empty( $obj['model'] ) && is_string( $obj['model'] ) && ( $obj['type'] ?? '' ) !== 'user' ) {
+				$model = $obj['model'];
+			}
+			$model = trim( $model );
+			if ( $model !== '' ) {
+				fclose( $fh );
+				return $model;
+			}
+		}
+		fclose( $fh );
+		return '';
 	}
 
 	/**

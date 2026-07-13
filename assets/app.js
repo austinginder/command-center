@@ -167,6 +167,31 @@ function sourceBadge(source, label) {
     return `<span class="inline-block shrink-0 text-[11px] font-mono font-medium px-1.5 py-0.5 rounded border ${colors}" title="${esc(label || source)}">${esc(source)}</span>`;
 }
 
+/** Short model chip for list rows (full id in title). */
+function modelBadge(model) {
+    if (!model) return '';
+    const short = shortModelName(model);
+    if (!short) return '';
+    return `<span class="hidden sm:inline-block shrink-0 max-w-[7.5rem] truncate text-[10px] font-mono px-1.5 py-0.5 rounded border border-zinc-200 dark:border-cc-line3 text-zinc-500 dark:text-cc-dim" title="${esc(model)}">${esc(short)}</span>`;
+}
+
+function shortModelName(model) {
+    const raw = String(model || '').trim();
+    if (!raw) return '';
+    let name = raw.includes('/') ? raw.slice(raw.lastIndexOf('/') + 1) : raw;
+    name = name.replace(/\s+/g, '-');
+    if (/^(grok|gpt)[-_.]?/i.test(name)) return name.toLowerCase();
+    name = name.replace(/^(claude|google|gemini|openai|xai)[-_]/i, '');
+    return name || raw;
+}
+
+/** Grok (and future) live session chip when the agent process is still up. */
+function liveBadge(s) {
+    if (!s || !s.live) return '';
+    const tip = s.live_pid ? `Live process PID ${s.live_pid}` : 'Session is currently active';
+    return `<span class="shrink-0 inline-flex items-center gap-1 text-[10px] font-mono font-medium px-1.5 py-0.5 rounded border border-emerald-300/80 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400" title="${esc(tip)}"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>live</span>`;
+}
+
 /** Predicted expiry chip for providers with a known day TTL (e.g. Claude). */
 function retentionBadge(s, showBadges) {
     if (!showBadges || s.days_left === undefined || s.days_left === null) return '';
@@ -323,9 +348,18 @@ async function loadIndexStatus() {
         const res = await fetch('/api/sessions/search/status');
         const d = await res.json();
         const el = document.getElementById('index-status');
-        if (el && d.indexed) {
-            el.textContent = d.indexed + ' indexed · ' + formatBytes(d.db_size_bytes || 0);
-        }
+        if (!el) return;
+        const parts = [];
+        if (d.listed != null) parts.push(d.listed + ' listed');
+        if (d.indexed != null) parts.push(d.indexed + ' indexed');
+        if (d.skipped > 0) parts.push(d.skipped + ' skipped');
+        if (d.stale > 0) parts.push(d.stale + ' stale');
+        if (d.db_size_bytes) parts.push(formatBytes(d.db_size_bytes));
+        el.textContent = parts.join(' · ');
+        const tips = [];
+        if (d.skipped > 0) tips.push(d.skipped + ' listed session(s) have no fingerprint (missing file) and cannot be indexed');
+        if (d.stale > 0) tips.push(d.stale + ' changed since last index - reindex or wait for auto-refresh');
+        el.title = tips.join('. ') || 'Search index health';
     } catch (err) {}
 }
 
@@ -1032,6 +1066,8 @@ function renderDashboard() {
             ${chevron}
             ${sourceBadge(src, s.sourceLabel)}
             <span class="flex-1 min-w-0 truncate text-sm text-zinc-800 dark:text-cc-ink" title="${esc(title)}">${esc(title)}</span>
+            ${liveBadge(s)}
+            ${modelBadge(s.model)}
             ${countBadge}
             ${retentionBadge(s, showRetentionBadges())}
             <span class="hidden md:block max-w-[240px] truncate text-xs font-mono text-zinc-400 dark:text-cc-dim" title="${esc(shortPath(s.project) || '')}">${esc(projectLabel(s.project) || s.projectName || '')}</span>
@@ -1362,7 +1398,8 @@ function renderDashboard() {
         try {
             const res = await fetch('/api/sessions/search/reindex', { method: 'POST' });
             const data = await res.json();
-            btn.title = `Index rebuilt: ${data.indexed} sessions in ${(data.elapsed_ms / 1000).toFixed(1)}s`;
+            const skipped = data.skipped > 0 ? `, skipped ${data.skipped}` : '';
+            btn.title = `Index rebuilt: ${data.indexed}${data.listed != null ? '/' + data.listed : ''} sessions in ${(data.elapsed_ms / 1000).toFixed(1)}s${skipped}`;
             loadIndexStatus();
         } catch (err) {
             btn.title = 'Rebuild failed';
@@ -1833,6 +1870,8 @@ function renderSessionView(sessionId) {
             if (meta) {
                 const parts = [];
                 if (s.is_subagent || s.parent_id) parts.push('subagent');
+                if (s.live) parts.push(s.live_pid ? `live (pid ${s.live_pid})` : 'live');
+                if (s.model) parts.push(shortModelName(s.model) || s.model);
                 if (s.project || s.projectName) parts.push(projectLabel(s.project) || s.projectName);
                 if (s.timestamp_s) parts.push(new Date(s.timestamp_s * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }));
                 if (s.size) parts.push(formatBytes(s.size));

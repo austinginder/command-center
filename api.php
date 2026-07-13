@@ -113,10 +113,13 @@ if ( $method === 'POST' && $path === '/sessions/tokens/backfill' ) {
 	exit;
 }
 
-// GET /api/sessions/search/status - index health/stats
+// GET /api/sessions/search/status - index health/stats (+ listed/skipped/stale)
 if ( $method === 'GET' && $path === '/sessions/search/status' ) {
 	require_once BASE_DIR . '/app/SearchIndex.php';
-	echo json_encode( SearchIndex::status() );
+	set_time_limit( 60 );
+	// Compare against the live list so the UI can show "skipped N" / stale.
+	$sessions = SessionRegistry::listSessions();
+	echo json_encode( SearchIndex::status( $sessions ) );
 	exit;
 }
 

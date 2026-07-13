@@ -301,9 +301,11 @@ class SearchIndex {
 		self::ensureSchema();
 
 		$toIndex = [];
+		$skipped = 0;
 		foreach ( $sessions as $s ) {
 			$fp = SessionRegistry::fingerprint( $s );
 			if ( ! $fp ) {
+				$skipped++;
 				continue;
 			}
 			$s['_mtime'] = $fp['mtime'];
@@ -316,6 +318,8 @@ class SearchIndex {
 
 		return [
 			'indexed'    => $count,
+			'listed'     => count( $sessions ),
+			'skipped'    => $skipped,
 			'elapsed_ms' => $elapsed,
 		];
 	}
@@ -483,8 +487,15 @@ class SearchIndex {
 
 	/**
 	 * Index status, broken out by source.
+	 *
+	 * When $sessions is provided (live list from SessionRegistry), also report
+	 * listed/skipped/stale so the UI can show coverage gaps:
+	 *   skipped = no fingerprint (missing file / unreadable)
+	 *   stale   = fingerprint changed since last index
+	 *
+	 * @param array|null $sessions Optional tagged session list.
 	 */
-	public static function status(): array {
+	public static function status( ?array $sessions = null ): array {
 		$db = self::db();
 
 		$total  = (int) $db->querySingle( 'SELECT COUNT(*) FROM session_files' );
@@ -499,12 +510,45 @@ class SearchIndex {
 			}
 		}
 
-		return [
+		$out = [
 			'indexed'       => $total,
 			'by_source'     => $bySource,
 			'db_size_bytes' => $dbSize,
 			'last_indexed'  => $last,
 		];
+
+		if ( is_array( $sessions ) ) {
+			$listed  = count( $sessions );
+			$skipped = 0;
+			$stale   = 0;
+			$fresh   = 0;
+			$stmt    = $db->prepare( 'SELECT file_mtime, file_size FROM session_files WHERE source = :source AND session_id = :id' );
+
+			foreach ( $sessions as $s ) {
+				$fp = SessionRegistry::fingerprint( $s );
+				if ( ! $fp ) {
+					$skipped++;
+					continue;
+				}
+				$source = $s['source'] ?? 'claude';
+				$stmt->bindValue( ':source', $source, SQLITE3_TEXT );
+				$stmt->bindValue( ':id', $s['id'] ?? '', SQLITE3_TEXT );
+				$row = $stmt->execute()->fetchArray( SQLITE3_ASSOC );
+				$stmt->reset();
+				if ( ! $row || (int) $row['file_mtime'] !== $fp['mtime'] || (int) $row['file_size'] !== $fp['size'] ) {
+					$stale++;
+				} else {
+					$fresh++;
+				}
+			}
+
+			$out['listed']  = $listed;
+			$out['skipped'] = $skipped;
+			$out['stale']   = $stale;
+			$out['fresh']   = $fresh;
+		}
+
+		return $out;
 	}
 
 	/**

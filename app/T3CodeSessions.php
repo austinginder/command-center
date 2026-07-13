@@ -230,7 +230,8 @@ class T3CodeSessions {
 			$updated       = self::isoToEpoch( $row['updated_at'] );
 			$size          = $sizes[ $id ]['chars'] ?? 0;
 
-			$out[] = [
+			$provider = trim( (string) ( $row['provider_name'] ?? '' ) );
+			$out[]    = [
 				'id'             => $id,
 				'display'        => $row['title'] ?? '',
 				'timestamp'      => $updated * 1000, // ms, matches ClaudeSessions convention
@@ -239,9 +240,11 @@ class T3CodeSessions {
 				'projectName'    => $projectTitle !== '' ? $projectTitle : ( $workspaceRoot ? Helpers::projectDisplayName( $workspaceRoot ) : '' ),
 				'size'           => $size,
 				'archived'       => ! empty( $row['archived_at'] ),
-				'provider'       => $row['provider_name']  ?? '',
+				'provider'       => $provider,
 				'runtimeStatus'  => $row['runtime_status'] ?? '',
 				'environmentId'  => $envId,
+				// T3 stores provider agent name (claudeAgent, codex), not a model id.
+				'model'          => $provider,
 			];
 		}
 

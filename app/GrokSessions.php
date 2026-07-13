@@ -762,6 +762,15 @@ class GrokSessions {
 			'model'       => $summary['current_model_id'] ?? '',
 		];
 
+		// Live chip when ~/.grok/active_sessions.json lists this session with a live PID.
+		$live = self::activeSessionMeta( $id );
+		if ( $live ) {
+			$record['live'] = true;
+			if ( ! empty( $live['pid'] ) ) {
+				$record['live_pid'] = (int) $live['pid'];
+			}
+		}
+
 		if ( $includeChildren ) {
 			$children = self::listSubagents( $sessionDir );
 			if ( $children ) {
@@ -771,6 +780,62 @@ class GrokSessions {
 		}
 
 		return $record;
+	}
+
+	/**
+	 * Map of session_id → active entry from ~/.grok/active_sessions.json.
+	 * Entries whose PID is no longer alive are ignored.
+	 *
+	 * @return array<string,array{session_id?:string,pid?:int,cwd?:string,opened_at?:string}>
+	 */
+	private static function activeSessionsMap(): array {
+		static $cached = null;
+		static $cachedAt = 0;
+		// Refresh at most every 2s within a request wave.
+		if ( is_array( $cached ) && ( microtime( true ) - $cachedAt ) < 2 ) {
+			return $cached;
+		}
+		$cached   = [];
+		$cachedAt = microtime( true );
+
+		$path = self::dataDir() . '/active_sessions.json';
+		if ( ! is_file( $path ) ) {
+			return $cached;
+		}
+		$raw = @file_get_contents( $path );
+		if ( $raw === false || $raw === '' ) {
+			return $cached;
+		}
+		$data = json_decode( $raw, true );
+		if ( ! is_array( $data ) ) {
+			return $cached;
+		}
+		// File may be a list or a map.
+		$entries = array_is_list( $data ) ? $data : array_values( $data );
+		foreach ( $entries as $entry ) {
+			if ( ! is_array( $entry ) ) {
+				continue;
+			}
+			$sid = (string) ( $entry['session_id'] ?? $entry['id'] ?? '' );
+			if ( $sid === '' || ! self::isValidSessionId( $sid ) ) {
+				continue;
+			}
+			$pid = (int) ( $entry['pid'] ?? 0 );
+			if ( $pid > 0 && function_exists( 'posix_kill' ) ) {
+				// signal 0: existence check, no signal sent.
+				if ( ! @posix_kill( $pid, 0 ) ) {
+					continue;
+				}
+			}
+			$cached[ $sid ] = $entry;
+		}
+		return $cached;
+	}
+
+	/** @return array{session_id?:string,pid?:int,cwd?:string,opened_at?:string}|null */
+	private static function activeSessionMeta( string $sessionId ): ?array {
+		$map = self::activeSessionsMap();
+		return $map[ $sessionId ] ?? null;
 	}
 
 	/**
