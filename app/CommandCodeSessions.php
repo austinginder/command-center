@@ -572,7 +572,9 @@ class CommandCodeSessions {
 			$path = '/' . implode( '/', $pathParts );
 
 			if ( is_dir( $path ) ) {
-				$cache[ $encoded ] = $path;
+				// Encoded dirs are lowercased; is_dir() on a case-insensitive
+				// FS accepts the wrong case. Restore real on-disk casing.
+				$cache[ $encoded ] = Helpers::restorePathCase( $path );
 			}
 		}
 	}

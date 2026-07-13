@@ -733,7 +733,7 @@ class OpenCodeSessions {
 		if ( $label ) {
 			return $label;
 		}
-		return $worktree ? basename( $worktree ) : substr( $projectID, 0, 8 );
+		return $worktree ? Helpers::projectDisplayName( $worktree ) : substr( $projectID, 0, 8 );
 	}
 
 	// ─── Internals ──────────────────────────────────────────────
@@ -790,7 +790,7 @@ class OpenCodeSessions {
 			return '(global)';
 		}
 		$worktree = $info['worktree'] ?? '';
-		return $worktree ? basename( $worktree ) : substr( $projectID, 0, 8 );
+		return $worktree ? Helpers::projectDisplayName( $worktree ) : substr( $projectID, 0, 8 );
 	}
 
 	private static function estimateSessionSize( string $sessionId ): int {

@@ -190,7 +190,7 @@ class KimiSessions {
 		foreach ( glob( $root . '/*', GLOB_ONLYDIR ) ?: [] as $hashDir ) {
 			$hash        = basename( $hashDir );
 			$projectPath = $hashMap[ $hash ] ?? '';
-			$projectName = $projectPath ? basename( $projectPath ) : '';
+			$projectName = $projectPath ? Helpers::projectDisplayName( $projectPath ) : '';
 
 			if ( $project !== null && $project !== '' && $project !== $projectPath ) {
 				continue;
@@ -262,7 +262,7 @@ class KimiSessions {
 			$path = $hashMap[ $hash ] ?? '';
 			$out[] = [
 				'path'     => $path,
-				'name'     => $path ? basename( $path ) : '(unknown ' . substr( $hash, 0, 8 ) . ')',
+				'name'     => $path ? Helpers::projectDisplayName( $path ) : '(unknown ' . substr( $hash, 0, 8 ) . ')',
 				'sessions' => $count,
 				'latest'   => $latest * 1000,
 			];

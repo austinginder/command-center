@@ -233,7 +233,7 @@ class T3CodeSessions {
 				'timestamp'      => $updated * 1000, // ms, matches ClaudeSessions convention
 				'timestamp_s'    => $updated,
 				'project'        => $workspaceRoot,
-				'projectName'    => $projectTitle !== '' ? $projectTitle : ( $workspaceRoot ? basename( $workspaceRoot ) : '' ),
+				'projectName'    => $projectTitle !== '' ? $projectTitle : ( $workspaceRoot ? Helpers::projectDisplayName( $workspaceRoot ) : '' ),
 				'size'           => $size,
 				'archived'       => ! empty( $row['archived_at'] ),
 				'provider'       => $row['provider_name']  ?? '',
@@ -279,7 +279,7 @@ class T3CodeSessions {
 			$latest = $row['latest_iso'] ? self::isoToEpoch( $row['latest_iso'] ) * 1000 : 0;
 			$out[]  = [
 				'path'     => $row['workspace_root'] ?? '',
-				'name'     => $row['title']          ?? basename( $row['workspace_root'] ?? '' ),
+				'name'     => $row['title']          ?? Helpers::projectDisplayName( $row['workspace_root'] ?? '' ),
 				'sessions' => (int) $row['sessions'],
 				'latest'   => $latest,
 			];

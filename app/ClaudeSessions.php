@@ -312,7 +312,7 @@ class ClaudeSessions {
 		// a parent - scanning ~10k agent transcripts on every list made the
 		// dashboard multi-second.
 		foreach ( $sessions as &$s ) {
-			$s['projectName'] = $s['project'] ? basename( $s['project'] ) : '';
+			$s['projectName'] = $s['project'] ? Helpers::projectDisplayName( $s['project'] ) : '';
 			$s['timestamp_s'] = intval( $s['timestamp'] / 1000 ); // JS ms → PHP seconds
 
 			$file = self::findSessionFile( $s['id'], $s['project'] );
@@ -351,7 +351,7 @@ class ClaudeSessions {
 			$child['parent_id']   = $parentId;
 			$child['is_subagent'] = true;
 			$child['project']     = $project;
-			$child['projectName'] = $project ? basename( $project ) : '';
+			$child['projectName'] = $project ? Helpers::projectDisplayName( $project ) : '';
 			return $child;
 		}
 
@@ -379,7 +379,7 @@ class ClaudeSessions {
 			'timestamp'   => ( (int) @filemtime( $file ) ) * 1000,
 			'timestamp_s' => (int) @filemtime( $file ),
 			'project'     => $project,
-			'projectName' => $project ? basename( $project ) : '',
+			'projectName' => $project ? Helpers::projectDisplayName( $project ) : '',
 			'size'        => (int) @filesize( $file ),
 		];
 		if ( $kids ) {
@@ -391,6 +391,7 @@ class ClaudeSessions {
 
 	/**
 	 * List unique projects from history.
+	 * Session counts are unique sessionIds (same as listSessions), not history lines.
 	 */
 	public static function listProjects(): array {
 		$historyFile = self::claudeDir() . '/history.jsonl';
@@ -399,6 +400,7 @@ class ClaudeSessions {
 		}
 
 		$projects = [];
+		$seen     = []; // project path => [ sessionId => true ]
 		$fp       = fopen( $historyFile, 'r' );
 
 		while ( ( $line = fgets( $fp ) ) !== false ) {
@@ -410,12 +412,17 @@ class ClaudeSessions {
 			if ( ! isset( $projects[ $p ] ) ) {
 				$projects[ $p ] = [
 					'path'     => $p,
-					'name'     => basename( $p ),
+					'name'     => Helpers::projectDisplayName( $p ),
 					'sessions' => 0,
 					'latest'   => 0,
 				];
+				$seen[ $p ] = [];
 			}
-			$projects[ $p ]['sessions']++;
+			$sessionId = $obj['sessionId'] ?? '';
+			if ( $sessionId !== '' && ! isset( $seen[ $p ][ $sessionId ] ) ) {
+				$seen[ $p ][ $sessionId ] = true;
+				$projects[ $p ]['sessions']++;
+			}
 			$ts = $obj['timestamp'] ?? 0;
 			if ( $ts > $projects[ $p ]['latest'] ) {
 				$projects[ $p ]['latest'] = $ts;
@@ -971,7 +978,7 @@ class ClaudeSessions {
 			'parent_id'     => $parentId,
 			'is_subagent'   => true,
 			'project'       => $project,
-			'projectName'   => $project ? basename( $project ) : '',
+			'projectName'   => $project ? Helpers::projectDisplayName( $project ) : '',
 		];
 	}
 

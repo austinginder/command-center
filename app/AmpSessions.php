@@ -546,14 +546,8 @@ class AmpSessions {
 	}
 
 	private static function projectName( string $path, array $thread ): string {
-		$name = basename( $path );
-		if ( in_array( $name, [ 'public', 'htdocs', 'www' ], true ) ) {
-			$parent = basename( dirname( $path ) );
-			if ( $parent !== '' && $parent !== '.' && $parent !== '/' ) {
-				return $parent;
-			}
-		}
-		return $name ?: (string) ( $thread['env']['initial']['trees'][0]['displayName'] ?? '' );
+		$name = Helpers::projectDisplayName( $path );
+		return $name !== '' ? $name : (string) ( $thread['env']['initial']['trees'][0]['displayName'] ?? '' );
 	}
 
 	private static function updatedTimestamp( array $thread, string $file ): int {

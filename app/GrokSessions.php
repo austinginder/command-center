@@ -284,7 +284,7 @@ class GrokSessions {
 
 		foreach ( glob( $root . '/*', GLOB_ONLYDIR ) ?: [] as $cwdDir ) {
 			$projectPath = self::resolveProjectPath( $cwdDir );
-			$projectName = $projectPath !== '' ? basename( $projectPath ) : '';
+			$projectName = $projectPath !== '' ? Helpers::projectDisplayName( $projectPath ) : '';
 
 			if ( $project !== null && $project !== '' && $project !== $projectPath ) {
 				continue;
@@ -386,7 +386,7 @@ class GrokSessions {
 				if ( ! isset( $byPath[ $path ] ) ) {
 					$byPath[ $path ] = [
 						'path'     => $path,
-						'name'     => $path === '(unknown)' ? '(unknown)' : self::projectDisplayName( $path ),
+						'name'     => $path === '(unknown)' ? '(unknown)' : Helpers::projectDisplayName( $path ),
 						'sessions' => 0,
 						'latest'   => 0,
 					];
@@ -749,7 +749,7 @@ class GrokSessions {
 			'timestamp'   => $updatedMs,
 			'timestamp_s' => (int) floor( $updatedMs / 1000 ),
 			'project'     => $path,
-			'projectName' => $path !== '' ? self::projectDisplayName( $path ) : '',
+			'projectName' => $path !== '' ? Helpers::projectDisplayName( $path ) : '',
 			'size'        => $size,
 			'created'     => $createdMs,
 			'model'       => $summary['current_model_id'] ?? '',
@@ -841,21 +841,6 @@ class GrokSessions {
 		$parentDir = dirname( dirname( dirname( $matches[0] ) ) );
 		$id        = basename( $parentDir );
 		return self::isValidSessionId( $id ) ? $id : null;
-	}
-
-	/**
-	 * Human project label. Cove sites are almost always …/Sites/<name>.localhost/public,
-	 * so "public" as a basename is useless - prefer the parent folder in that case.
-	 */
-	private static function projectDisplayName( string $path ): string {
-		$base = basename( $path );
-		if ( $base === 'public' || $base === 'htdocs' || $base === 'www' ) {
-			$parent = basename( dirname( $path ) );
-			if ( $parent !== '' && $parent !== '/' && $parent !== '.' ) {
-				return $parent;
-			}
-		}
-		return $base !== '' ? $base : $path;
 	}
 
 	private static function readJson( string $path ): ?array {

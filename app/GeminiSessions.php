@@ -168,7 +168,7 @@ class GeminiSessions {
 				'timestamp'   => $updatedMs,
 				'timestamp_s' => (int) floor( $updatedMs / 1000 ),
 				'project'     => $path,
-				'projectName' => self::projectDisplayName( $path ),
+				'projectName' => Helpers::projectDisplayName( $path ),
 				'size'        => (int) @filesize( $file ),
 				'created'     => $createdMs,
 				'model'       => $meta['model'] ?? '',
@@ -200,7 +200,7 @@ class GeminiSessions {
 			if ( ! isset( $byPath[ $path ] ) ) {
 				$byPath[ $path ] = [
 					'path'     => $path,
-					'name'     => $path === '(unknown)' ? '(unknown)' : self::projectDisplayName( $path ),
+					'name'     => $path === '(unknown)' ? '(unknown)' : Helpers::projectDisplayName( $path ),
 					'sessions' => 0,
 					'latest'   => 0,
 				];
@@ -438,20 +438,6 @@ class GeminiSessions {
 		}
 		// Human slug without mapping - use as display-ish path placeholder.
 		return $projectDir !== '' ? $projectDir : '(unknown)';
-	}
-
-	private static function projectDisplayName( string $path ): string {
-		if ( $path === '' || $path === '(unknown)' ) {
-			return '(unknown)';
-		}
-		$base = basename( $path );
-		if ( in_array( $base, [ 'public', 'htdocs', 'www' ], true ) ) {
-			$parent = basename( dirname( $path ) );
-			if ( $parent !== '' && $parent !== '/' && $parent !== '.' ) {
-				return $parent;
-			}
-		}
-		return $base !== '' ? $base : $path;
 	}
 
 	// ─── Session file parsing ───────────────────────────────────
