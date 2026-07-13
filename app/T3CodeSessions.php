@@ -218,6 +218,9 @@ class T3CodeSessions {
 
 		// Build id→(msg_count, total_chars) map in one query for efficient size estimation.
 		$sizes = self::threadSizes();
+		// Deep-link resume: t3code://app/{env}/{thread}
+		// (TanStack route /_chat/$environmentId/$threadId → /{env}/{thread}).
+		$envId = self::environmentId();
 
 		$out = [];
 		while ( $row = $res->fetchArray( SQLITE3_ASSOC ) ) {
@@ -238,6 +241,7 @@ class T3CodeSessions {
 				'archived'       => ! empty( $row['archived_at'] ),
 				'provider'       => $row['provider_name']  ?? '',
 				'runtimeStatus'  => $row['runtime_status'] ?? '',
+				'environmentId'  => $envId,
 			];
 		}
 
@@ -486,13 +490,40 @@ class T3CodeSessions {
 	/**
 	 * Resolve the T3 Code home directory (env override → ~/.t3).
 	 */
-	public static function dbPath(): string {
+	public static function t3Home(): string {
 		$home = getenv( 'T3CODE_HOME' );
 		if ( ! $home ) {
 			$baseHome = getenv( 'HOME' ) ?: ( $_SERVER['HOME'] ?? '' );
 			$home     = $baseHome . '/.t3';
 		}
-		return rtrim( $home, '/' ) . '/userdata/state.sqlite';
+		return rtrim( $home, '/' );
+	}
+
+	/**
+	 * Resolve the T3 Code home directory (env override → ~/.t3).
+	 */
+	public static function dbPath(): string {
+		return self::t3Home() . '/userdata/state.sqlite';
+	}
+
+	/**
+	 * Local environment id written by T3 (userdata/environment-id).
+	 * Used for deep links: t3code://app/{environmentId}/{threadId}.
+	 * See pingdotgg/t3code ElectronProtocol + web route _chat.$environmentId.$threadId.
+	 */
+	public static function environmentId(): string {
+		static $cached = null;
+		if ( $cached !== null ) {
+			return $cached;
+		}
+		$path = self::t3Home() . '/userdata/environment-id';
+		if ( ! is_file( $path ) ) {
+			$cached = '';
+			return $cached;
+		}
+		$id = trim( (string) @file_get_contents( $path ) );
+		$cached = $id;
+		return $cached;
 	}
 
 	/**
