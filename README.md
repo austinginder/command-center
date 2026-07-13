@@ -14,12 +14,13 @@ If you bounce between AI coding CLIs, your conversation history ends up scattere
 | Claude Code | `~/.claude` | ✅ |
 | OpenCode | `$XDG_DATA_HOME/opencode` | ✅ |
 | Kimi CLI | `~/.kimi` | ✅ |
-| Command Code | `~/.commandcode` | - |
-| T3 Code | `~/.t3` | - |
+| Command Code | `~/.commandcode` | estimated |
+| T3 Code | `~/.t3` | estimated |
 | Antigravity | `~/.gemini/antigravity-cli/brain` | - |
-| Grok CLI | `~/.grok` | - |
+| Gemini CLI | `~/.gemini/tmp` | ✅ |
+| Grok CLI | `~/.grok` | estimated |
 
-Tools you don't use are skipped automatically. Each location can be overridden with an env var (`AMP_HOME`, `CLAUDE_HOME`, `OPENCODE_HOME`, `KIMI_HOME`, `COMMANDCODE_HOME`, `T3CODE_HOME`, `ANTIGRAVITY_HOME`, `GROK_HOME`).
+Tools you don't use are skipped automatically. Each location can be overridden with an env var (`AMP_HOME`, `CLAUDE_HOME`, `OPENCODE_HOME`, `KIMI_HOME`, `COMMANDCODE_HOME`, `T3CODE_HOME`, `ANTIGRAVITY_HOME`, `GEMINI_HOME`, `GROK_HOME`).
 
 ## Features
 

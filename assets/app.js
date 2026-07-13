@@ -144,6 +144,7 @@ const SOURCE_COLORS = {
     claude:      'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
     commandcode: 'bg-cyan-500/10 text-cyan-500 border-cyan-500/20',
     antigravity: 'bg-orange-500/10 text-orange-500 border-orange-500/20',
+    gemini:      'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20',
     kimi:        'bg-pink-500/10 text-pink-500 border-pink-500/20',
     grok:        'bg-amber-500/10 text-amber-500 border-amber-500/20',
 };
@@ -155,6 +156,7 @@ const SOURCE_DOTS = {
     claude:      'bg-emerald-500',
     commandcode: 'bg-cyan-500',
     antigravity: 'bg-orange-500',
+    gemini:      'bg-sky-500',
     kimi:        'bg-pink-500',
     grok:        'bg-amber-500',
 };
@@ -199,6 +201,7 @@ const RESUME_BINS = {
     claude:      { bin: 'claude', flag: '--dangerously-skip-permissions', resume: '--resume' },
     commandcode: { bin: 'cmd',    flag: '--yolo',                         resume: '--resume' },
     antigravity: { bin: 'agy',    flag: '--dangerously-skip-permissions', resume: '--conversation' },
+    gemini:      { bin: 'gemini', flag: '',                               resume: '--resume' },
     grok:        { bin: 'grok',   flag: '',                               resume: '--resume' },
 };
 

@@ -11,6 +11,7 @@ require BASE_DIR . '/app/OpenCodeSessions.php';
 require BASE_DIR . '/app/KimiSessions.php';
 require BASE_DIR . '/app/CommandCodeSessions.php';
 require BASE_DIR . '/app/AntigravitySessions.php';
+require BASE_DIR . '/app/GeminiSessions.php';
 require BASE_DIR . '/app/GrokSessions.php';
 require BASE_DIR . '/app/SessionRegistry.php';
 require BASE_DIR . '/app/Retention.php';

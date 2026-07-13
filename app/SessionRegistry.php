@@ -40,6 +40,7 @@ class SessionRegistry {
 			'opencode'    => 'OpenCodeSessions',
 			'kimi'        => 'KimiSessions',
 			'antigravity' => 'AntigravitySessions',
+			'gemini'      => 'GeminiSessions',
 			'grok'        => 'GrokSessions',
 		];
 	}
@@ -203,6 +204,7 @@ class SessionRegistry {
 			case 'opencode':
 			case 'kimi':
 			case 'amp':
+			case 'gemini':
 				return 'measured';
 			case 'grok':
 			case 'commandcode':

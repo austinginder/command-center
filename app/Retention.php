@@ -21,13 +21,14 @@ class Retention {
 		return [
 			// Detected dynamically - placeholder for kind/default only.
 			'claude'      => [ 'kind' => 'days', 'default_days' => 30, 'writable' => true ],
+			'gemini'      => [ 'kind' => 'days', 'default_days' => 30, 'writable' => true ],
 			'grok'        => [ 'kind' => 'none', 'note' => 'No auto-delete; sessions stay until removed' ],
-			'opencode'    => [ 'kind' => 'none', 'note' => 'No known auto-delete' ],
+			'opencode'    => [ 'kind' => 'none', 'note' => 'No known auto-delete; storage grows until manual delete' ],
 			'kimi'        => [ 'kind' => 'none', 'note' => 'No known auto-delete' ],
-			'amp'         => [ 'kind' => 'none', 'note' => 'No known local auto-delete' ],
+			'amp'         => [ 'kind' => 'none', 'note' => 'Manual archive/delete only; no local day timer' ],
 			'commandcode' => [ 'kind' => 'none', 'note' => 'No known auto-delete' ],
 			't3code'      => [ 'kind' => 'none', 'note' => 'No known auto-delete' ],
-			'antigravity' => [ 'kind' => 'unknown', 'note' => 'Retention policy not documented' ],
+			'antigravity' => [ 'kind' => 'none', 'note' => 'No known auto-delete (distinct from Gemini CLI retention)' ],
 		];
 	}
 
@@ -140,6 +141,9 @@ class Retention {
 		if ( $sourceId === 'claude' ) {
 			return self::detectClaude( $out );
 		}
+		if ( $sourceId === 'gemini' ) {
+			return self::detectGemini( $out );
+		}
 
 		return $out;
 	}
@@ -216,6 +220,109 @@ class Retention {
 		}
 		$raw = trim( (string) @file_get_contents( $file ) );
 		return $raw !== '' ? $raw : null;
+	}
+
+	/**
+	 * Gemini CLI: general.sessionRetention in ~/.gemini/settings.json.
+	 * Default enabled=true, maxAge="30d". When enabled=false, treat as none.
+	 */
+	private static function detectGemini( array $out ): array {
+		$home = self::geminiDir();
+		$path = $home . '/settings.json';
+		$out['settings_path'] = $path;
+		$out['default_days']  = 30;
+		$out['writable']      = true;
+
+		$enabled = true;
+		$days    = 30;
+		$source  = 'default';
+		$maxCount = null;
+		$noteExtra = '';
+
+		if ( is_file( $path ) ) {
+			$raw  = @file_get_contents( $path );
+			$data = $raw !== false ? json_decode( $raw, true ) : null;
+			if ( ! is_array( $data ) ) {
+				$out['kind']   = 'days';
+				$out['days']   = 30;
+				$out['source'] = 'default-unreadable';
+				$out['note']   = 'settings.json unreadable; Gemini default is 30-day retention when enabled';
+				return $out;
+			}
+			$ret = $data['general']['sessionRetention'] ?? null;
+			if ( is_array( $ret ) ) {
+				$source = 'user-settings';
+				if ( array_key_exists( 'enabled', $ret ) ) {
+					$enabled = (bool) $ret['enabled'];
+				}
+				if ( ! empty( $ret['maxAge'] ) && is_string( $ret['maxAge'] ) ) {
+					$parsed = self::parseDurationDays( $ret['maxAge'] );
+					if ( $parsed !== null ) {
+						$days = $parsed;
+					}
+				}
+				if ( isset( $ret['maxCount'] ) && is_numeric( $ret['maxCount'] ) ) {
+					$maxCount = (int) $ret['maxCount'];
+					$noteExtra = '; also caps at ' . $maxCount . ' sessions (oldest dropped)';
+				}
+			}
+		}
+
+		if ( ! $enabled ) {
+			$out['kind']   = 'none';
+			$out['days']   = null;
+			$out['source'] = $source;
+			$out['note']   = 'sessionRetention.enabled=false; Gemini will not auto-delete chats';
+			return $out;
+		}
+
+		$out['kind']   = 'days';
+		$out['days']   = max( 1, $days );
+		$out['source'] = $source;
+		if ( $source === 'default' ) {
+			$out['note'] = 'Default 30-day cleanup via general.sessionRetention.maxAge' . $noteExtra;
+		} else {
+			$out['note'] = 'Gemini CLI auto-deletes chats older than this (sessionRetention)' . $noteExtra;
+		}
+		return $out;
+	}
+
+	private static function geminiDir(): string {
+		$override = getenv( 'GEMINI_HOME' );
+		if ( $override ) {
+			return rtrim( $override, '/' );
+		}
+		$home = getenv( 'HOME' ) ?: ( $_SERVER['HOME'] ?? '' );
+		return rtrim( $home, '/' ) . '/.gemini';
+	}
+
+	/**
+	 * Parse Gemini duration strings like "30d", "7d", "24h", "4w" into whole days.
+	 * Hours round up to at least 1 day when > 0.
+	 */
+	private static function parseDurationDays( string $raw ): ?int {
+		$raw = trim( strtolower( $raw ) );
+		if ( $raw === '' ) {
+			return null;
+		}
+		if ( ! preg_match( '/^(\d+)\s*([hdwmy])?$/', $raw, $m ) ) {
+			return null;
+		}
+		$n = (int) $m[1];
+		$u = $m[2] ?? 'd';
+		switch ( $u ) {
+			case 'h':
+				return max( 1, (int) ceil( $n / 24 ) );
+			case 'd':
+				return max( 1, $n );
+			case 'w':
+				return max( 1, $n * 7 );
+			case 'm':
+				return max( 1, $n * 30 );
+			case 'y':
+				return max( 1, $n * 365 );
+		}
+		return null;
 	}
 
 	// ─── Session annotation ───────────────────────────────────
