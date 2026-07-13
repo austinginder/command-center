@@ -307,7 +307,10 @@ class ClaudeSessions {
 		// Sort by timestamp descending.
 		usort( $sessions, fn( $a, $b ) => $b['timestamp'] - $a['timestamp'] );
 
-		// Add project short name, session file size, and nested subagents.
+		// Add project short name, size, and subagent *count* only.
+		// Full children[] is lazy-loaded via getSession() when the UI expands
+		// a parent - scanning ~10k agent transcripts on every list made the
+		// dashboard multi-second.
 		foreach ( $sessions as &$s ) {
 			$s['projectName'] = $s['project'] ? basename( $s['project'] ) : '';
 			$s['timestamp_s'] = intval( $s['timestamp'] / 1000 ); // JS ms → PHP seconds
@@ -315,15 +318,16 @@ class ClaudeSessions {
 			$file = self::findSessionFile( $s['id'], $s['project'] );
 			$s['size'] = $file && file_exists( $file ) ? filesize( $file ) : 0;
 
-			$children = self::listSubagents( $s['id'], $s['project'] ?? '' );
-			if ( $children ) {
-				$s['children']       = $children;
-				$s['subagent_count'] = count( $children );
+			$count = self::countSubagents( $s['id'], $s['project'] ?? '', $file );
+			if ( $count > 0 ) {
+				$s['subagent_count'] = $count;
+				// Empty children signals the UI to fetch on expand.
+				$s['children'] = [];
 			}
 		}
 		unset( $s );
 
-		return $sessions;
+		return array_values( $sessions );
 	}
 
 	/**
@@ -351,9 +355,14 @@ class ClaudeSessions {
 			return $child;
 		}
 
-		// Primary: find in listSessions (includes children).
+		// Primary: find in listSessions, then hydrate full children for expand/detail.
 		foreach ( self::listSessions() as $s ) {
 			if ( ( $s['id'] ?? '' ) === $sessionId ) {
+				$kids = self::listSubagents( $sessionId, $s['project'] ?? '' );
+				if ( $kids ) {
+					$s['children']       = $kids;
+					$s['subagent_count'] = count( $kids );
+				}
 				return $s;
 			}
 		}
@@ -363,7 +372,8 @@ class ClaudeSessions {
 			return null;
 		}
 		$project = self::projectPathFromSessionFile( $file );
-		return [
+		$kids    = self::listSubagents( $sessionId, $project );
+		$rec     = [
 			'id'          => $sessionId,
 			'display'     => $sessionId,
 			'timestamp'   => ( (int) @filemtime( $file ) ) * 1000,
@@ -371,8 +381,12 @@ class ClaudeSessions {
 			'project'     => $project,
 			'projectName' => $project ? basename( $project ) : '',
 			'size'        => (int) @filesize( $file ),
-			'children'    => self::listSubagents( $sessionId, $project ),
 		];
+		if ( $kids ) {
+			$rec['children']       = $kids;
+			$rec['subagent_count'] = count( $kids );
+		}
+		return $rec;
 	}
 
 	/**
@@ -807,7 +821,7 @@ class ClaudeSessions {
 		}
 
 		if ( $project ) {
-			$encoded = str_replace( '/', '-', ltrim( $project, '/' ) );
+			$encoded = self::encodeProjectDir( $project );
 			$file    = self::claudeDir() . '/projects/' . $encoded . '/' . $sessionId . '.jsonl';
 			if ( file_exists( $file ) ) {
 				return $file;
@@ -815,6 +829,14 @@ class ClaudeSessions {
 		}
 
 		return self::findSessionFileById( $sessionId );
+	}
+
+	/**
+	 * Claude encodes project paths by replacing / and . with hyphens.
+	 * Absolute paths keep a leading hyphen: /Users/foo → -Users-foo.
+	 */
+	public static function encodeProjectDir( string $project ): string {
+		return str_replace( [ '/', '.' ], '-', $project );
 	}
 
 	/**
@@ -853,7 +875,37 @@ class ClaudeSessions {
 	}
 
 	/**
+	 * Fast count of nested agent transcripts (no file content reads).
+	 * Used on the list endpoint so the dashboard stays snappy.
+	 */
+	private static function countSubagents( string $parentId, string $project, ?string $mainFile = null ): int {
+		$file = $mainFile ?: self::findSessionFile( $parentId, $project );
+		if ( ! $file ) {
+			return 0;
+		}
+		$sub = dirname( $file ) . '/' . $parentId . '/subagents';
+		if ( ! is_dir( $sub ) ) {
+			return 0;
+		}
+		$n = 0;
+		// Shallow agents.
+		foreach ( glob( $sub . '/agent-*.jsonl' ) ?: [] as $f ) {
+			if ( ! str_contains( basename( $f ), 'acompact-' ) ) {
+				$n++;
+			}
+		}
+		// Workflow-nested agents (rare).
+		foreach ( glob( $sub . '/workflows/*/agent-*.jsonl' ) ?: [] as $f ) {
+			if ( ! str_contains( basename( $f ), 'acompact-' ) ) {
+				$n++;
+			}
+		}
+		return $n;
+	}
+
+	/**
 	 * List nested Claude subagent transcripts for a parent session.
+	 * Heavier than countSubagents - used for expand / session detail only.
 	 *
 	 * @return array<int,array>
 	 */

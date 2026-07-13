@@ -1181,13 +1181,31 @@ function renderDashboard() {
 
     function wireRows(container) {
         container.querySelectorAll('.subagent-toggle').forEach(btn => {
-            btn.addEventListener('click', e => {
+            btn.addEventListener('click', async e => {
                 e.stopPropagation();
                 e.preventDefault();
                 const id = btn.dataset.parentId;
                 if (!id) return;
-                if (expandedParents.has(id)) expandedParents.delete(id);
-                else expandedParents.add(id);
+                if (expandedParents.has(id)) {
+                    expandedParents.delete(id);
+                    renderList();
+                    return;
+                }
+                expandedParents.add(id);
+                // Lazy-load children when the list only has a count (Claude).
+                const s = allSessions.find(x => x.id === id);
+                if (s && (!s.children || !s.children.length) && (s.subagent_count || 0) > 0) {
+                    btn.classList.add('opacity-50');
+                    try {
+                        const src = s.source || '';
+                        const url = '/api/sessions/' + encodeURIComponent(id) + (src ? '?source=' + encodeURIComponent(src) : '');
+                        const full = await (await fetch(url)).json();
+                        if (full && Array.isArray(full.children)) {
+                            s.children = full.children;
+                            s.subagent_count = full.children.length;
+                        }
+                    } catch (err) { /* keep empty */ }
+                }
                 renderList();
             });
         });
