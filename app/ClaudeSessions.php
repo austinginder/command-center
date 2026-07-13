@@ -28,9 +28,31 @@ class ClaudeSessions {
 
 	/**
 	 * Does this provider own the given session id?
+	 * Accepts primary UUIDs and nested subagent ids: {parentUuid}_agent_{agentId}.
 	 */
 	public static function hasSession( string $sessionId ): bool {
 		return self::findSessionFileById( $sessionId ) !== null;
+	}
+
+	/**
+	 * Synthetic id for a Claude subagent transcript file under a parent session.
+	 * Format: {parentUuid}_agent_{agentId} (URL-safe for /api/sessions/{id}).
+	 */
+	public static function subagentSessionId( string $parentId, string $agentId ): string {
+		$agentId = preg_replace( '/^agent-/', '', $agentId );
+		return $parentId . '_agent_' . $agentId;
+	}
+
+	/**
+	 * Parse a synthetic subagent id. Returns [parentId, agentId] or null.
+	 *
+	 * @return array{0:string,1:string}|null
+	 */
+	public static function parseSubagentSessionId( string $sessionId ): ?array {
+		if ( ! preg_match( '/^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})_agent_(.+)$/i', $sessionId, $m ) ) {
+			return null;
+		}
+		return [ $m[1], $m[2] ];
 	}
 
 	/**
@@ -285,16 +307,72 @@ class ClaudeSessions {
 		// Sort by timestamp descending.
 		usort( $sessions, fn( $a, $b ) => $b['timestamp'] - $a['timestamp'] );
 
-		// Add project short name and session file size.
+		// Add project short name, session file size, and nested subagents.
 		foreach ( $sessions as &$s ) {
 			$s['projectName'] = $s['project'] ? basename( $s['project'] ) : '';
 			$s['timestamp_s'] = intval( $s['timestamp'] / 1000 ); // JS ms → PHP seconds
 
 			$file = self::findSessionFile( $s['id'], $s['project'] );
 			$s['size'] = $file && file_exists( $file ) ? filesize( $file ) : 0;
+
+			$children = self::listSubagents( $s['id'], $s['project'] ?? '' );
+			if ( $children ) {
+				$s['children']       = $children;
+				$s['subagent_count'] = count( $children );
+			}
 		}
+		unset( $s );
 
 		return $sessions;
+	}
+
+	/**
+	 * Single session (primary or nested subagent) for the session viewer.
+	 */
+	public static function getSession( string $sessionId ): ?array {
+		$parsed = self::parseSubagentSessionId( $sessionId );
+		if ( $parsed ) {
+			[ $parentId, $agentId ] = $parsed;
+			$file = self::findSubagentFile( $parentId, $agentId );
+			if ( ! $file ) {
+				return null;
+			}
+			$parentFile = self::findSessionFileById( $parentId );
+			$project    = '';
+			if ( $parentFile ) {
+				// Derive project path from encoded project dir name when possible.
+				$project = self::projectPathFromSessionFile( $parentFile );
+			}
+			$child = self::subagentRecord( $parentId, $file, $project );
+			$child['parent_id']   = $parentId;
+			$child['is_subagent'] = true;
+			$child['project']     = $project;
+			$child['projectName'] = $project ? basename( $project ) : '';
+			return $child;
+		}
+
+		// Primary: find in listSessions (includes children).
+		foreach ( self::listSessions() as $s ) {
+			if ( ( $s['id'] ?? '' ) === $sessionId ) {
+				return $s;
+			}
+		}
+		// Not in history.jsonl but file exists.
+		$file = self::findSessionFileById( $sessionId );
+		if ( ! $file ) {
+			return null;
+		}
+		$project = self::projectPathFromSessionFile( $file );
+		return [
+			'id'          => $sessionId,
+			'display'     => $sessionId,
+			'timestamp'   => ( (int) @filemtime( $file ) ) * 1000,
+			'timestamp_s' => (int) @filemtime( $file ),
+			'project'     => $project,
+			'projectName' => $project ? basename( $project ) : '',
+			'size'        => (int) @filesize( $file ),
+			'children'    => self::listSubagents( $sessionId, $project ),
+		];
 	}
 
 	/**
@@ -692,9 +770,15 @@ class ClaudeSessions {
 	// ─── File Lookup ─────────────────────────────────────────────
 
 	/**
-	 * Find session file by scanning project directories.
+	 * Find session file by scanning project dirs.
+	 * Also resolves nested subagent ids ({parent}_agent_{agentId}).
 	 */
 	public static function findSessionFileById( string $sessionId ): ?string {
+		$parsed = self::parseSubagentSessionId( $sessionId );
+		if ( $parsed ) {
+			return self::findSubagentFile( $parsed[0], $parsed[1] );
+		}
+
 		$projectsDir = self::claudeDir() . '/projects';
 		if ( ! is_dir( $projectsDir ) ) {
 			return null;
@@ -717,6 +801,11 @@ class ClaudeSessions {
 	 * Find session file using known project path.
 	 */
 	public static function findSessionFile( string $sessionId, string $project ): ?string {
+		$parsed = self::parseSubagentSessionId( $sessionId );
+		if ( $parsed ) {
+			return self::findSubagentFile( $parsed[0], $parsed[1] );
+		}
+
 		if ( $project ) {
 			$encoded = str_replace( '/', '-', ltrim( $project, '/' ) );
 			$file    = self::claudeDir() . '/projects/' . $encoded . '/' . $sessionId . '.jsonl';
@@ -726,6 +815,179 @@ class ClaudeSessions {
 		}
 
 		return self::findSessionFileById( $sessionId );
+	}
+
+	/**
+	 * Locate agent-{id}.jsonl under parent session's subagents/ tree.
+	 */
+	private static function findSubagentFile( string $parentId, string $agentId ): ?string {
+		$agentId = preg_replace( '/^agent-/', '', $agentId );
+		$parent  = self::findSessionFileById( $parentId );
+		if ( ! $parent ) {
+			return null;
+		}
+		// Prefer nested subagents dir; also allow project-level agent-*.jsonl sidechains.
+		$candidates = [
+			dirname( $parent ) . '/' . $parentId . '/subagents/agent-' . $agentId . '.jsonl',
+			dirname( $parent ) . '/agent-' . $agentId . '.jsonl',
+		];
+		foreach ( $candidates as $file ) {
+			if ( file_exists( $file ) ) {
+				return $file;
+			}
+		}
+		// Recursive under parent subagents/ (workflows nest deeper).
+		$subRoot = dirname( $parent ) . '/' . $parentId . '/subagents';
+		if ( is_dir( $subRoot ) ) {
+			$it = new RecursiveIteratorIterator(
+				new RecursiveDirectoryIterator( $subRoot, FilesystemIterator::SKIP_DOTS )
+			);
+			$want = 'agent-' . $agentId . '.jsonl';
+			foreach ( $it as $f ) {
+				if ( $f->isFile() && $f->getFilename() === $want ) {
+					return $f->getPathname();
+				}
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * List nested Claude subagent transcripts for a parent session.
+	 *
+	 * @return array<int,array>
+	 */
+	private static function listSubagents( string $parentId, string $project ): array {
+		$file = self::findSessionFile( $parentId, $project );
+		if ( ! $file ) {
+			return [];
+		}
+		$agentFiles = self::subagentFiles( $file );
+		// Also pick up project-level agent-*.jsonl that reference this sessionId.
+		$projectDir = dirname( $file );
+		foreach ( glob( $projectDir . '/agent-*.jsonl' ) ?: [] as $side ) {
+			// Only include if the file's sessionId matches parent (sidechain of this session).
+			if ( self::agentFileBelongsToSession( $side, $parentId ) ) {
+				$agentFiles[] = $side;
+			}
+		}
+		$agentFiles = array_values( array_unique( $agentFiles ) );
+		if ( ! $agentFiles ) {
+			return [];
+		}
+
+		$out = [];
+		foreach ( $agentFiles as $agentFile ) {
+			$base = basename( $agentFile, '.jsonl' ); // agent-xxx or agent-acompact-xxx
+			if ( ! str_starts_with( $base, 'agent-' ) ) {
+				continue;
+			}
+			$agentId = substr( $base, 6 );
+			// Skip pure compaction sidechains in the UI list - they're noise.
+			if ( str_starts_with( $agentId, 'acompact-' ) ) {
+				continue;
+			}
+			$out[] = self::subagentRecord( $parentId, $agentFile, $project );
+		}
+
+		usort( $out, fn( $a, $b ) => ( $b['timestamp'] ?? 0 ) <=> ( $a['timestamp'] ?? 0 ) );
+		return $out;
+	}
+
+	/**
+	 * @return array{id:string,display:string,status:string,subagent_type:string,timestamp:int,timestamp_s:int,size:int,resumable:bool,parent_id:string,is_subagent:bool}
+	 */
+	private static function subagentRecord( string $parentId, string $agentFile, string $project ): array {
+		$base    = basename( $agentFile, '.jsonl' );
+		$agentId = str_starts_with( $base, 'agent-' ) ? substr( $base, 6 ) : $base;
+		$mtime   = (int) ( @filemtime( $agentFile ) ?: 0 );
+		$size    = (int) ( @filesize( $agentFile ) ?: 0 );
+		$display = self::firstUserPromptFromJsonl( $agentFile );
+		if ( $display === '' ) {
+			$display = 'Subagent ' . $agentId;
+		}
+
+		return [
+			'id'            => self::subagentSessionId( $parentId, $agentId ),
+			'display'       => $display,
+			'status'        => 'completed',
+			'subagent_type' => str_starts_with( $agentId, 'acompact-' ) ? 'compact' : 'agent',
+			'timestamp'     => $mtime * 1000,
+			'timestamp_s'   => $mtime,
+			'size'          => $size,
+			'resumable'     => false,
+			'parent_id'     => $parentId,
+			'is_subagent'   => true,
+			'project'       => $project,
+			'projectName'   => $project ? basename( $project ) : '',
+		];
+	}
+
+	private static function agentFileBelongsToSession( string $file, string $sessionId ): bool {
+		$fh = @fopen( $file, 'r' );
+		if ( ! $fh ) {
+			return false;
+		}
+		$line = fgets( $fh );
+		fclose( $fh );
+		if ( $line === false ) {
+			return false;
+		}
+		$obj = json_decode( trim( $line ), true );
+		return is_array( $obj ) && ( $obj['sessionId'] ?? '' ) === $sessionId;
+	}
+
+	private static function firstUserPromptFromJsonl( string $file ): string {
+		$fh = @fopen( $file, 'r' );
+		if ( ! $fh ) {
+			return '';
+		}
+		$maxLines = 40;
+		$n        = 0;
+		while ( ( $line = fgets( $fh ) ) !== false && $n < $maxLines ) {
+			$n++;
+			$obj = json_decode( trim( $line ), true );
+			if ( ! is_array( $obj ) || ( $obj['type'] ?? '' ) !== 'user' ) {
+				continue;
+			}
+			$content = $obj['message']['content'] ?? '';
+			if ( is_string( $content ) && trim( $content ) !== '' ) {
+				fclose( $fh );
+				return mb_substr( trim( $content ), 0, 120 );
+			}
+			if ( is_array( $content ) ) {
+				foreach ( $content as $block ) {
+					if ( ( $block['type'] ?? '' ) === 'text' && ! empty( $block['text'] ) ) {
+						fclose( $fh );
+						return mb_substr( trim( $block['text'] ), 0, 120 );
+					}
+				}
+			}
+		}
+		fclose( $fh );
+		return '';
+	}
+
+	/**
+	 * Best-effort reverse of Claude's project dir encoding.
+	 * Absolute paths are stored as -Users-foo-bar (leading hyphen, / → -).
+	 * Not perfect for path segments that themselves contain hyphens.
+	 */
+	private static function projectPathFromSessionFile( string $sessionFile ): string {
+		// .../projects/<encoded>/<session>.jsonl  OR  .../projects/<encoded>/<session>/subagents/...
+		$projectsDir = self::claudeDir() . '/projects/';
+		if ( ! str_starts_with( $sessionFile, $projectsDir ) ) {
+			return '';
+		}
+		$rest = substr( $sessionFile, strlen( $projectsDir ) );
+		$enc  = explode( '/', $rest, 2 )[0] ?? '';
+		if ( $enc === '' ) {
+			return '';
+		}
+		if ( $enc[0] === '-' ) {
+			return '/' . str_replace( '-', '/', substr( $enc, 1 ) );
+		}
+		return str_replace( '-', '/', $enc );
 	}
 
 	// ─── Message Parsing ─────────────────────────────────────────

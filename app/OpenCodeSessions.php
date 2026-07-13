@@ -180,13 +180,14 @@ class OpenCodeSessions {
 	// ─── Listing ────────────────────────────────────────────────
 
 	public static function listSessions( ?string $project = null ): array {
-		$out  = [];
-		$seen = [];
+		$parents  = []; // id => record
+		$children = []; // parent_id => child records[]
+		$seen     = [];
 
 		// Primary: the SQLite database. Superset of the legacy tree once
 		// OpenCode's own migration has run.
 		$rows = self::dbRows(
-			'SELECT s.id, s.title, s.slug, s.project_id, s.time_created, s.time_updated,
+			'SELECT s.id, s.title, s.slug, s.project_id, s.parent_id, s.time_created, s.time_updated,
 			        (SELECT COUNT(*) FROM message m WHERE m.session_id = s.id) AS messages,
 			        p.worktree, p.name AS project_label
 			   FROM session s LEFT JOIN project p ON p.id = s.project_id'
@@ -202,8 +203,7 @@ class OpenCodeSessions {
 			}
 
 			$updatedMs = (int) ( $row['time_updated'] ?: $row['time_created'] );
-
-			$out[] = [
+			$rec       = [
 				'id'          => $row['id'],
 				'display'     => $row['title'] ?: ( $row['slug'] ?? '' ),
 				'timestamp'   => $updatedMs,
@@ -214,6 +214,18 @@ class OpenCodeSessions {
 				'created'     => (int) ( $row['time_created'] ?: $updatedMs ),
 				'slug'        => $row['slug'] ?? '',
 			];
+
+			$parentId = trim( (string) ( $row['parent_id'] ?? '' ) );
+			if ( $parentId !== '' ) {
+				$rec['parent_id']   = $parentId;
+				$rec['is_subagent'] = true;
+				// Infer type from title like "Explore project (@explore subagent)".
+				$rec['subagent_type'] = self::inferSubagentType( $rec['display'] );
+				$rec['status']        = 'completed';
+				$children[ $parentId ][] = $rec;
+			} else {
+				$parents[ $row['id'] ] = $rec;
+			}
 		}
 
 		// Union: legacy per-file sessions the db migration missed (or the
@@ -237,8 +249,7 @@ class OpenCodeSessions {
 
 			$updatedMs = $ses['time']['updated'] ?? $ses['time']['created'] ?? 0;
 			$createdMs = $ses['time']['created'] ?? $updatedMs;
-
-			$out[] = [
+			$rec       = [
 				'id'          => $ses['id'],
 				'display'     => $ses['title'] ?? ( $ses['slug'] ?? '' ),
 				'timestamp'   => (int) $updatedMs,
@@ -249,10 +260,137 @@ class OpenCodeSessions {
 				'created'     => (int) $createdMs,
 				'slug'        => $ses['slug'] ?? '',
 			];
+
+			$parentId = trim( (string) ( $ses['parentID'] ?? $ses['parent_id'] ?? '' ) );
+			if ( $parentId !== '' ) {
+				$rec['parent_id']     = $parentId;
+				$rec['is_subagent']   = true;
+				$rec['subagent_type'] = self::inferSubagentType( $rec['display'] );
+				$rec['status']        = 'completed';
+				$children[ $parentId ][] = $rec;
+			} else {
+				$parents[ $ses['id'] ] = $rec;
+			}
+		}
+
+		// Attach children to parents; orphan children (missing parent) surface top-level.
+		$out = [];
+		foreach ( $parents as $id => $rec ) {
+			if ( ! empty( $children[ $id ] ) ) {
+				usort( $children[ $id ], fn( $a, $b ) => $b['timestamp'] <=> $a['timestamp'] );
+				$rec['children']       = $children[ $id ];
+				$rec['subagent_count'] = count( $children[ $id ] );
+				unset( $children[ $id ] );
+			}
+			$out[] = $rec;
+		}
+		foreach ( $children as $orphans ) {
+			foreach ( $orphans as $rec ) {
+				// Keep parent_id for UI but list as top-level so they're not lost.
+				$out[] = $rec;
+			}
 		}
 
 		usort( $out, fn( $a, $b ) => $b['timestamp'] <=> $a['timestamp'] );
 		return $out;
+	}
+
+	/**
+	 * Single session by id (parent or child).
+	 */
+	public static function getSession( string $sessionId ): ?array {
+		if ( ! preg_match( '/^ses_[A-Za-z0-9]+$/', $sessionId ) ) {
+			return null;
+		}
+
+		$rows = self::dbRows(
+			'SELECT s.id, s.title, s.slug, s.project_id, s.parent_id, s.time_created, s.time_updated,
+			        (SELECT COUNT(*) FROM message m WHERE m.session_id = s.id) AS messages,
+			        p.worktree, p.name AS project_label
+			   FROM session s LEFT JOIN project p ON p.id = s.project_id
+			  WHERE s.id = ?',
+			[ $sessionId ]
+		);
+		if ( $rows ) {
+			$row       = $rows[0];
+			$worktree  = self::dbProjectPath( $row['project_id'] ?? '', $row['worktree'] ?? null );
+			$name      = self::dbProjectName( $row['project_id'] ?? '', $row['worktree'] ?? null, $row['project_label'] ?? null );
+			$updatedMs = (int) ( $row['time_updated'] ?: $row['time_created'] );
+			$rec       = [
+				'id'          => $row['id'],
+				'display'     => $row['title'] ?: ( $row['slug'] ?? '' ),
+				'timestamp'   => $updatedMs,
+				'timestamp_s' => intval( $updatedMs / 1000 ),
+				'project'     => $worktree,
+				'projectName' => $name,
+				'size'        => (int) $row['messages'],
+				'created'     => (int) ( $row['time_created'] ?: $updatedMs ),
+				'slug'        => $row['slug'] ?? '',
+			];
+			$parentId = trim( (string) ( $row['parent_id'] ?? '' ) );
+			if ( $parentId !== '' ) {
+				$rec['parent_id']     = $parentId;
+				$rec['is_subagent']   = true;
+				$rec['subagent_type'] = self::inferSubagentType( $rec['display'] );
+				$rec['status']        = 'completed';
+			} else {
+				// Attach children.
+				$kids = self::dbRows(
+					'SELECT s.id, s.title, s.slug, s.parent_id, s.time_created, s.time_updated,
+					        (SELECT COUNT(*) FROM message m WHERE m.session_id = s.id) AS messages
+					   FROM session s WHERE s.parent_id = ?',
+					[ $sessionId ]
+				);
+				$childRecs = [];
+				foreach ( $kids as $k ) {
+					$u = (int) ( $k['time_updated'] ?: $k['time_created'] );
+					$childRecs[] = [
+						'id'            => $k['id'],
+						'display'       => $k['title'] ?: ( $k['slug'] ?? '' ),
+						'timestamp'     => $u,
+						'timestamp_s'   => intval( $u / 1000 ),
+						'size'          => (int) $k['messages'],
+						'parent_id'     => $sessionId,
+						'is_subagent'   => true,
+						'subagent_type' => self::inferSubagentType( $k['title'] ?: '' ),
+						'status'        => 'completed',
+						'project'       => $worktree,
+						'projectName'   => $name,
+					];
+				}
+				if ( $childRecs ) {
+					usort( $childRecs, fn( $a, $b ) => $b['timestamp'] <=> $a['timestamp'] );
+					$rec['children']       = $childRecs;
+					$rec['subagent_count'] = count( $childRecs );
+				}
+			}
+			return $rec;
+		}
+
+		// Legacy file fallback via listSessions scan.
+		foreach ( self::listSessions() as $s ) {
+			if ( ( $s['id'] ?? '' ) === $sessionId ) {
+				return $s;
+			}
+			foreach ( $s['children'] ?? [] as $c ) {
+				if ( ( $c['id'] ?? '' ) === $sessionId ) {
+					$c['project']     = $c['project'] ?? $s['project'] ?? '';
+					$c['projectName'] = $c['projectName'] ?? $s['projectName'] ?? '';
+					return $c;
+				}
+			}
+		}
+		return null;
+	}
+
+	private static function inferSubagentType( string $title ): string {
+		if ( preg_match( '/@([a-z0-9_-]+)\s+subagent/i', $title, $m ) ) {
+			return $m[1];
+		}
+		if ( preg_match( '/\(([^)]*subagent[^)]*)\)/i', $title, $m ) ) {
+			return trim( $m[1] );
+		}
+		return 'subagent';
 	}
 
 	/**

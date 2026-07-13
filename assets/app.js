@@ -986,6 +986,9 @@ function renderDashboard() {
                 const dur = formatDurationMs(c.duration_ms);
                 const tools = c.tool_calls != null ? c.tool_calls + ' tools' : '';
                 const meta = [c.subagent_type, c.status, dur, tools].filter(Boolean).join(' · ');
+                const childResume = c.resumable === false
+                    ? '<span class="w-[26px] shrink-0"></span>'
+                    : copyBtnHtml(src, c.project || s.project, c.id);
                 html += `
                 <div class="session-row session-row-child group flex items-center gap-2 sm:gap-3 pl-10 pr-4 py-1.5 cursor-pointer border-t border-zinc-50 dark:border-cc-line2 hover:bg-zinc-50 dark:hover:bg-cc-panel"
                      data-session-id="${esc(c.id)}" data-source="${esc(src)}" data-parent-id="${esc(s.id)}">
@@ -993,7 +996,7 @@ function renderDashboard() {
                     <span class="flex-1 min-w-0 truncate text-[13px] text-zinc-600 dark:text-cc-mut" title="${esc(cTitle)}">${esc(cTitle)}</span>
                     <span class="hidden sm:block max-w-[220px] truncate text-[11px] font-mono text-zinc-400 dark:text-cc-dim">${esc(meta)}</span>
                     <span class="text-right text-[11px] font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap" style="width:4.5rem">${c.timestamp_s ? clockTime(c.timestamp_s) : ''}</span>
-                    ${copyBtnHtml(src, s.project, c.id)}
+                    ${childResume}
                 </div>`;
             });
         }
