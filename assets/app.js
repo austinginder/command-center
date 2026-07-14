@@ -169,17 +169,24 @@ function sourceBadge(source, label) {
     return `<span class="inline-block shrink-0 text-[11px] font-mono font-medium px-1.5 py-0.5 rounded border ${colors}" title="${esc(label || source)}">${esc(source)}</span>`;
 }
 
-/** Short model chip for list rows (full id in title). */
-function modelBadge(model) {
+/** Short model chip for list rows (full id in title). Optional effort suffix (Codex). */
+function modelBadge(model, effort) {
     if (!model) return '';
     const short = shortModelName(model);
     if (!short) return '';
-    return `<span class="hidden sm:inline-block shrink-0 max-w-[7.5rem] truncate text-[10px] font-mono px-1.5 py-0.5 rounded border border-zinc-200 dark:border-cc-line3 text-zinc-500 dark:text-cc-dim" title="${esc(model)}">${esc(short)}</span>`;
+    const eff = effort && String(effort).trim() && String(effort).toLowerCase() !== 'default'
+        ? ' · ' + String(effort).trim()
+        : '';
+    const label = short + eff;
+    const tip = effort ? `${model} (${effort})` : model;
+    return `<span class="hidden sm:inline-block shrink-0 max-w-[9rem] truncate text-[10px] font-mono px-1.5 py-0.5 rounded border border-zinc-200 dark:border-cc-line3 text-zinc-500 dark:text-cc-dim" title="${esc(tip)}">${esc(label)}</span>`;
 }
 
 function shortModelName(model) {
     const raw = String(model || '').trim();
     if (!raw) return '';
+    // Bare provider labels are not models (Codex session_meta.model_provider).
+    if (/^(openai|anthropic|google|xai|azure)$/i.test(raw)) return '';
     let name = raw.includes('/') ? raw.slice(raw.lastIndexOf('/') + 1) : raw;
     name = name.replace(/\s+/g, '-');
     if (/^(grok|gpt)[-_.]?/i.test(name)) return name.toLowerCase();
@@ -1071,7 +1078,7 @@ function renderDashboard() {
             ${sourceBadge(src, s.sourceLabel)}
             <span class="flex-1 min-w-0 truncate text-sm text-zinc-800 dark:text-cc-ink" title="${esc(title)}">${esc(title)}</span>
             ${liveBadge(s)}
-            ${modelBadge(s.model)}
+            ${modelBadge(s.model, s.reasoning_effort)}
             ${countBadge}
             ${retentionBadge(s, showRetentionBadges())}
             <span class="hidden md:block max-w-[240px] truncate text-xs font-mono text-zinc-400 dark:text-cc-dim" title="${esc(shortPath(s.project) || '')}">${esc(projectLabel(s.project) || s.projectName || '')}</span>
@@ -1875,7 +1882,14 @@ function renderSessionView(sessionId) {
                 const parts = [];
                 if (s.is_subagent || s.parent_id) parts.push('subagent');
                 if (s.live) parts.push(s.live_pid ? `live (pid ${s.live_pid})` : 'live');
-                if (s.model) parts.push(shortModelName(s.model) || s.model);
+                if (s.model) {
+                    const m = shortModelName(s.model) || s.model;
+                    parts.push(s.reasoning_effort ? `${m} · ${s.reasoning_effort}` : m);
+                }
+                if (s.originator) parts.push(s.originator);
+                else if (s.codex_source) parts.push(s.codex_source);
+                if (s.cli_version) parts.push('cli ' + s.cli_version);
+                if (s.git_branch) parts.push(s.git_branch);
                 if (s.project || s.projectName) parts.push(projectLabel(s.project) || s.projectName);
                 if (s.timestamp_s) parts.push(new Date(s.timestamp_s * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }));
                 if (s.size) parts.push(formatBytes(s.size));

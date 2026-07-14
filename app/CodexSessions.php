@@ -176,8 +176,18 @@ class CodexSessions {
 				$existing['project']     = $s['project'];
 				$existing['projectName'] = $s['projectName'] ?? '';
 			}
-			if ( empty( $existing['model'] ) && ! empty( $s['model'] ) ) {
+			if ( ( self::isBareProviderLabel( $existing['model'] ?? '' ) || empty( $existing['model'] ) )
+				&& ! empty( $s['model'] ) && ! self::isBareProviderLabel( $s['model'] ) ) {
 				$existing['model'] = $s['model'];
+			}
+			if ( empty( $existing['reasoning_effort'] ) && ! empty( $s['reasoning_effort'] ) ) {
+				$existing['reasoning_effort'] = $s['reasoning_effort'];
+			}
+			if ( empty( $existing['cli_version'] ) && ! empty( $s['cli_version'] ) ) {
+				$existing['cli_version'] = $s['cli_version'];
+			}
+			if ( empty( $existing['originator'] ) && ! empty( $s['originator'] ) ) {
+				$existing['originator'] = $s['originator'];
 			}
 			if ( (int) ( $s['size'] ?? 0 ) > (int) ( $existing['size'] ?? 0 ) ) {
 				$existing['size'] = $s['size'];
@@ -248,6 +258,13 @@ class CodexSessions {
 
 		$row   = self::threadRow( $sessionId );
 		$model = trim( (string) ( $row['model'] ?? '' ) );
+		if ( self::isBareProviderLabel( $model ) ) {
+			$model = '';
+		}
+		if ( $model === '' ) {
+			$peek  = self::peekRolloutMeta( $file );
+			$model = $peek['model'] ?? '';
+		}
 		$events = [
 			[
 				'type'       => 'init',
@@ -514,17 +531,46 @@ class CodexSessions {
 			$rollout = (string) ( $row['rollout_path'] ?? '' );
 			$size    = ( $rollout !== '' && is_file( $rollout ) ) ? (int) @filesize( $rollout ) : 0;
 
+			$model = trim( (string) ( $row['model'] ?? '' ) );
+			if ( self::isBareProviderLabel( $model ) ) {
+				$model = '';
+			}
+			// Catalog may lag; prefer turn_context model from rollout when needed.
+			$effort = trim( (string) ( $row['reasoning_effort'] ?? '' ) );
+			$cli    = trim( (string) ( $row['cli_version'] ?? '' ) );
+			if ( ( $model === '' || $effort === '' ) && $rollout !== '' && is_file( $rollout ) ) {
+				$peek = self::peekRolloutMeta( $rollout );
+				if ( $model === '' && ! empty( $peek['model'] ) ) {
+					$model = $peek['model'];
+				}
+				if ( $effort === '' && ! empty( $peek['effort'] ) ) {
+					$effort = $peek['effort'];
+				}
+				if ( $cli === '' && ! empty( $peek['cli_version'] ) ) {
+					$cli = $peek['cli_version'];
+				}
+			}
+
 			$rec = [
-				'id'          => $id,
-				'display'     => $display,
-				'timestamp'   => $updatedMs,
-				'timestamp_s' => (int) floor( $updatedMs / 1000 ),
-				'project'     => $path,
-				'projectName' => $path !== '' ? Helpers::projectDisplayName( $path ) : '',
-				'size'        => $size,
-				'created'     => $createdMs,
-				'model'       => trim( (string) ( $row['model'] ?? '' ) ),
+				'id'                => $id,
+				'display'           => $display,
+				'timestamp'         => $updatedMs,
+				'timestamp_s'       => (int) floor( $updatedMs / 1000 ),
+				'project'           => $path,
+				'projectName'       => $path !== '' ? Helpers::projectDisplayName( $path ) : '',
+				'size'              => $size,
+				'created'           => $createdMs,
+				'model'             => $model,
+				'reasoning_effort'  => $effort,
+				'cli_version'       => $cli,
+				'codex_source'      => trim( (string) ( $row['source'] ?? '' ) ),
 			];
+			if ( ! empty( $row['git_branch'] ) ) {
+				$rec['git_branch'] = (string) $row['git_branch'];
+			}
+			if ( ! empty( $row['tokens_used'] ) ) {
+				$rec['tokens_used'] = (int) $row['tokens_used'];
+			}
 			if ( ! empty( $row['archived'] ) ) {
 				$rec['archived'] = true;
 			}
@@ -568,16 +614,29 @@ class CodexSessions {
 			if ( $display === '' ) {
 				$display = $id;
 			}
+			// session_meta only has model_provider ("openai"); real model is on turn_context.
+			$peek = self::peekRolloutMeta( $path );
+			$model  = $peek['model'] ?? '';
+			$effort = $peek['effort'] ?? '';
+			// Prefer file mtime (activity) over session_meta start time when later.
+			$mtimeMs = ( (int) $file->getMTime() ) * 1000;
+			if ( $mtimeMs > $updatedMs ) {
+				$updatedMs = $mtimeMs;
+			}
 			$out[] = [
-				'id'          => $id,
-				'display'     => mb_substr( preg_replace( '/\s+/', ' ', $display ) ?? $display, 0, 200 ),
-				'timestamp'   => $updatedMs,
-				'timestamp_s' => (int) floor( $updatedMs / 1000 ),
-				'project'     => $cwd,
-				'projectName' => $cwd !== '' ? Helpers::projectDisplayName( $cwd ) : '',
-				'size'        => (int) $file->getSize(),
-				'created'     => $updatedMs,
-				'model'       => '',
+				'id'               => $id,
+				'display'          => mb_substr( preg_replace( '/\s+/', ' ', $display ) ?? $display, 0, 200 ),
+				'timestamp'        => $updatedMs,
+				'timestamp_s'      => (int) floor( $updatedMs / 1000 ),
+				'project'          => $cwd,
+				'projectName'      => $cwd !== '' ? Helpers::projectDisplayName( $cwd ) : '',
+				'size'             => (int) $file->getSize(),
+				'created'          => $updatedMs,
+				'model'            => $model,
+				'reasoning_effort' => $effort,
+				'cli_version'      => $peek['cli_version'] ?? trim( (string) ( $meta['cli_version'] ?? '' ) ),
+				'originator'       => $peek['originator'] ?? trim( (string) ( $meta['originator'] ?? '' ) ),
+				'codex_source'     => trim( (string) ( $meta['source'] ?? '' ) ),
 			];
 		}
 		usort( $out, fn( $a, $b ) => $b['timestamp'] <=> $a['timestamp'] );
@@ -606,6 +665,78 @@ class CodexSessions {
 		}
 		fclose( $fh );
 		return null;
+	}
+
+	/**
+	 * Cheap head scan for fields that live on turn_context (not session_meta).
+	 * session_meta only carries model_provider ("openai"); the concrete model
+	 * (e.g. gpt-5.5) and reasoning effort are on the first turn_context.
+	 *
+	 * @return array{model?:string,effort?:string,cli_version?:string,originator?:string}
+	 */
+	private static function peekRolloutMeta( string $file ): array {
+		static $cache = [];
+		if ( isset( $cache[ $file ] ) ) {
+			return $cache[ $file ];
+		}
+		$out = [];
+		$fh  = @fopen( $file, 'r' );
+		if ( ! $fh ) {
+			$cache[ $file ] = $out;
+			return $out;
+		}
+		$max = 60;
+		$n   = 0;
+		while ( ( $line = fgets( $fh ) ) !== false && $n < $max ) {
+			$n++;
+			$obj = json_decode( trim( $line ), true );
+			if ( ! is_array( $obj ) ) {
+				continue;
+			}
+			$type = $obj['type'] ?? '';
+			$pl   = is_array( $obj['payload'] ?? null ) ? $obj['payload'] : [];
+
+			if ( $type === 'session_meta' ) {
+				if ( ! empty( $pl['cli_version'] ) ) {
+					$out['cli_version'] = trim( (string) $pl['cli_version'] );
+				}
+				if ( ! empty( $pl['originator'] ) ) {
+					$out['originator'] = trim( (string) $pl['originator'] );
+				}
+				// Do NOT use model_provider ("openai") as model.
+				continue;
+			}
+
+			if ( $type === 'turn_context' ) {
+				$m = trim( (string) ( $pl['model'] ?? '' ) );
+				if ( $m === '' && is_array( $pl['collaboration_mode']['settings'] ?? null ) ) {
+					$m = trim( (string) ( $pl['collaboration_mode']['settings']['model'] ?? '' ) );
+				}
+				if ( $m !== '' && ! self::isBareProviderLabel( $m ) ) {
+					$out['model'] = $m;
+				}
+				$effort = trim( (string) ( $pl['effort'] ?? '' ) );
+				if ( $effort === '' && is_array( $pl['collaboration_mode']['settings'] ?? null ) ) {
+					$effort = trim( (string) ( $pl['collaboration_mode']['settings']['reasoning_effort'] ?? '' ) );
+				}
+				if ( $effort !== '' ) {
+					$out['effort'] = $effort;
+				}
+				// First turn_context is enough for list chips.
+				if ( ! empty( $out['model'] ) ) {
+					break;
+				}
+			}
+		}
+		fclose( $fh );
+		$cache[ $file ] = $out;
+		return $out;
+	}
+
+	/** True for labels that are providers, not models (must not show as model chip). */
+	private static function isBareProviderLabel( string $label ): bool {
+		$l = strtolower( trim( $label ) );
+		return $l === '' || in_array( $l, [ 'openai', 'anthropic', 'google', 'xai', 'azure' ], true );
 	}
 
 	private static function firstUserFromRollout( string $file ): string {
