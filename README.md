@@ -24,12 +24,14 @@ Tools you don't use are skipped automatically. Each location can be overridden w
 
 ## Features
 
-- **Session index** - every session from every tool in one reverse-chronological list, grouped by day, filterable by tool and project.
-- **Deep search** - SQLite FTS5 full-text search across conversation content, with snippets and highlighting. The index updates incrementally; only changed sessions are re-read.
+- **Session index** - every session from every tool in one reverse-chronological list, grouped by day, filterable by tool and project. Nested subagents expand under their parent where the tool records them.
+- **Deep search** - SQLite FTS5 full-text search across conversation content, with snippets and highlighting. The index updates incrementally; only changed sessions are re-read. Status shows listed / indexed / skipped / stale coverage.
 - **Session viewer** - replay any conversation: user messages, assistant responses, collapsible tool-call groups, and turn summaries.
-- **Resume commands** - one click copies the exact CLI command to resume a session in its original tool and project directory.
-- **Activity heatmap** - a GitHub-style contribution graph of sessions per day, with per-day token usage on hover.
-- **Token tracking** - input/output/cache token totals per session, for tools that record usage.
+- **Resume commands** - one click copies the exact CLI command to resume a session in its original tool and project directory (OpenCode, Kimi, Claude, Grok, and others; T3 opens the desktop app).
+- **Activity heatmap + usage** - GitHub-style sessions-per-day graph with token tooltips; monthly usage page for input / output / cache across providers.
+- **Token tracking** - recorded usage where tools expose it; estimated usage for Command Code, T3 Code, and Grok.
+- **Retention monitor** - optional per-provider TTL warnings when agent tools auto-delete old transcripts.
+- **Model + live chips** - model labels on list rows when available; Grok shows a live badge for sessions still running.
 - **`command-center` CLI** - search and inspect your history from the terminal, including `flow`: reconstruct how a project was built from its transcripts.
 
 ## Install
@@ -86,10 +88,14 @@ GET  /api/sessions                     list sessions (?source=, ?project=)
 GET  /api/sessions/projects            list projects
 GET  /api/sessions/sources             available providers
 GET  /api/sessions/search?q=           deep search (?source=, ?project=)
+GET  /api/sessions/search/status       index health (listed / indexed / skipped / stale)
 GET  /api/sessions/stats/daily         per-day counts + token totals
+GET  /api/sessions/stats/monthly       per-month token totals by source
+GET  /api/sessions/{id}                session meta (incl. nested subagents)
 GET  /api/sessions/{id}/conversation   full parsed conversation
 POST /api/sessions/search/reindex      rebuild the index
 POST /api/sessions/tokens/backfill     backfill token usage for indexed sessions
+GET  /api/retention                    retention report (?prefer= preferences)
 GET  /stream?session={id}              SSE replay of a session
 ```
 

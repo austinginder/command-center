@@ -2,6 +2,34 @@
 
 All notable changes to Command Center are documented here.
 
+## [1.5.0] - 2026-07-14
+
+### Added
+
+- **Gemini CLI provider** - indexes `~/.gemini/tmp` chats with project path resolution, token usage where available, and retention TTL detection.
+- **Session retention monitor** - optional per-provider TTL policies with at-risk / expired labels on the dashboard (collapsed by default). Auto-delete remains opt-in and off by default for new providers.
+- **Nested subagents** - Grok, OpenCode, and Claude Code parents expand to show child agent sessions in the list and session viewer (Claude subagent counts load lazily for fast dashboard list times).
+- **Estimated token usage** for Command Code, T3 Code, and Grok (char-based estimates; heatmap / usage views mark them as estimated).
+- **Model chips** on session rows where cheap to read (Claude, OpenCode, Grok, Amp, T3 provider agent).
+- **Grok live badge** - green live chip when `~/.grok/active_sessions.json` lists a session with a still-running PID.
+- **Index coverage stats** - status and reindex report listed / indexed / skipped (no fingerprint) / stale counts in the UI and CLI.
+- Resume copy recipes for OpenCode (`--session`) and Kimi (`--session`); T3 opens the desktop app with the thread title (no external deep-link yet).
+
+### Improved
+
+- Claude session titles: prefer first good history prompt and transcript summary over last slash-command / stub reply.
+- Claude project session counts: unique `sessionId`s, not every `history.jsonl` line.
+- Shared `Helpers::projectDisplayName()` so `…/public` workspaces show the site name across providers.
+- Command Code path decode restores real filesystem casing after lowercased encode.
+- Dashboard list performance: Claude subagent children load on expand instead of scanning every agent file on list.
+- Grok: subagent filtering, signals-based usage, and recap FTS improvements.
+
+### Fixed
+
+- `/api/sessions/{id}` no longer shadows `/sessions/projects` and `/sessions/sources`.
+- T3 Code resume no longer pretends `t3code://` deep-links into a thread (desktop content scheme + pairing gate).
+- Usage charts render at natural scale; local SPA assets cache-bust so updates reach browsers.
+
 ## [1.4.0] - 2026-07-11
 
 ### Added

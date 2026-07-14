@@ -1,6 +1,6 @@
 # Command Center CLI
 
-A CLI for searching Claude Code conversation history. Powered by a SQLite FTS5 full-text index across all your sessions.
+A CLI for searching AI coding session history across every supported tool (Claude Code, OpenCode, Amp, Grok, and more). Powered by a SQLite FTS5 full-text index on your machine.
 
 ## Installation
 
@@ -67,19 +67,23 @@ Rebuild the full-text search index from scratch.
 
 ```bash
 command-center reindex
-# Indexed 718 sessions in 4523ms
-# DB size: 28.3 MB
+# Indexed 2610 of 2616 sessions in 4523ms
+# Skipped 6 (no fingerprint / missing file)
+# DB size: 127.1 MB
 ```
 
 ### status
 
-Check index health.
+Check index health (listed vs indexed, skipped without fingerprint, stale needing reindex).
 
 ```bash
 command-center status
 # Index status
-#   Sessions indexed: 718
-#   Database size:    28.3 MB
+#   Sessions listed:  2616
+#   Sessions indexed: 2610
+#   Skipped:          6 (no fingerprint)
+#   Stale:            12 (need reindex)
+#   Database size:    127.1 MB
 #   Last indexed:     10s ago
 ```
 
