@@ -147,6 +147,7 @@ const SOURCE_COLORS = {
     gemini:      'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20',
     kimi:        'bg-pink-500/10 text-pink-500 border-pink-500/20',
     grok:        'bg-amber-500/10 text-amber-500 border-amber-500/20',
+    codex:       'bg-teal-500/10 text-teal-700 dark:text-teal-400 border-teal-500/20',
 };
 
 const SOURCE_DOTS = {
@@ -159,6 +160,7 @@ const SOURCE_DOTS = {
     gemini:      'bg-sky-500',
     kimi:        'bg-pink-500',
     grok:        'bg-amber-500',
+    codex:       'bg-teal-500',
 };
 
 function sourceBadge(source, label) {
@@ -256,6 +258,8 @@ const RESUME_BINS = {
     opencode:    { bin: 'opencode', flag: '',                               resume: '--session' },
     kimi:        { bin: 'kimi',     flag: '',                               resume: '--session' },
     t3code:      { kind: 't3-open-app', bundleId: 'com.t3tools.t3code' },
+    // Codex desktop (ChatGPT.app) is com.openai.codex - no stable CLI resume yet.
+    codex:       { kind: 't3-open-app', bundleId: 'com.openai.codex' },
 };
 
 function resumeCommand(source, project, sessionId, environmentId, display) {
@@ -1900,6 +1904,9 @@ function renderSessionView(sessionId) {
                 btn.classList.remove('hidden');
                 if (s.source === 't3code') {
                     btn.title = 'Open T3 Code (pick thread in sidebar)';
+                }
+                if (s.source === 'codex') {
+                    btn.title = 'Open Codex / ChatGPT (find thread in app)';
                 }
                 btn.addEventListener('click', () => copyWithFlash(btn, cmd, '.resume-icon'));
             }

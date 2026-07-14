@@ -19,8 +19,9 @@ If you bounce between AI coding CLIs, your conversation history ends up scattere
 | Antigravity | `~/.gemini/antigravity-cli/brain` | - |
 | Gemini CLI | `~/.gemini/tmp` | ✅ |
 | Grok CLI | `~/.grok` | estimated |
+| Codex | `~/.codex` (ChatGPT / VS Code Codex) | ✅ |
 
-Tools you don't use are skipped automatically. Each location can be overridden with an env var (`AMP_HOME`, `CLAUDE_HOME`, `OPENCODE_HOME`, `KIMI_HOME`, `COMMANDCODE_HOME`, `T3CODE_HOME`, `ANTIGRAVITY_HOME`, `GEMINI_HOME`, `GROK_HOME`).
+Tools you don't use are skipped automatically. Each location can be overridden with an env var (`AMP_HOME`, `CLAUDE_HOME`, `OPENCODE_HOME`, `KIMI_HOME`, `COMMANDCODE_HOME`, `T3CODE_HOME`, `ANTIGRAVITY_HOME`, `GEMINI_HOME`, `GROK_HOME`, `CODEX_HOME`).
 
 ## Features
 
