@@ -135,12 +135,75 @@ class CodexSessions {
 
 	// ─── Listing ────────────────────────────────────────────────
 
+	/**
+	 * Union SQLite catalog + on-disk rollouts.
+	 *
+	 * After the ChatGPT desktop merge, newer threads often appear in
+	 * sessions/YYYY/MM/DD/rollout-*.jsonl and session_index.jsonl before
+	 * (or without) a matching row in state_5.sqlite. Catalog-only listing
+	 * missed those.
+	 */
 	public static function listSessions( ?string $project = null ): array {
-		$rows = self::allThreadRows();
-		if ( $rows ) {
-			return self::listFromCatalog( $rows, $project );
+		$byId = [];
+
+		foreach ( self::listFromCatalog( self::allThreadRows(), null ) as $s ) {
+			$id = $s['id'] ?? '';
+			if ( $id !== '' ) {
+				$byId[ $id ] = $s;
+			}
 		}
-		return self::listFromRollouts( $project );
+
+		// Rollouts fill gaps and refresh size/mtime when catalog is stale.
+		foreach ( self::listFromRollouts( null ) as $s ) {
+			$id = $s['id'] ?? '';
+			if ( $id === '' ) {
+				continue;
+			}
+			if ( ! isset( $byId[ $id ] ) ) {
+				$byId[ $id ] = $s;
+				continue;
+			}
+			// Prefer newer timestamp; keep catalog title/model when present.
+			$existing = $byId[ $id ];
+			if ( (int) ( $s['timestamp'] ?? 0 ) > (int) ( $existing['timestamp'] ?? 0 ) ) {
+				$existing['timestamp']   = $s['timestamp'];
+				$existing['timestamp_s'] = $s['timestamp_s'];
+			}
+			if ( empty( $existing['display'] ) || $existing['display'] === $id ) {
+				$existing['display'] = $s['display'];
+			}
+			if ( empty( $existing['project'] ) && ! empty( $s['project'] ) ) {
+				$existing['project']     = $s['project'];
+				$existing['projectName'] = $s['projectName'] ?? '';
+			}
+			if ( empty( $existing['model'] ) && ! empty( $s['model'] ) ) {
+				$existing['model'] = $s['model'];
+			}
+			if ( (int) ( $s['size'] ?? 0 ) > (int) ( $existing['size'] ?? 0 ) ) {
+				$existing['size'] = $s['size'];
+			}
+			$byId[ $id ] = $existing;
+		}
+
+		// session_index titles for rows that still only have UUID display.
+		$titles = self::sessionIndexMap();
+		foreach ( $byId as $id => &$s ) {
+			if ( ( empty( $s['display'] ) || $s['display'] === $id ) && ! empty( $titles[ $id ]['name'] ) ) {
+				$s['display'] = $titles[ $id ]['name'];
+			}
+			if ( ! empty( $titles[ $id ]['updated_ms'] ) && (int) $titles[ $id ]['updated_ms'] > (int) ( $s['timestamp'] ?? 0 ) ) {
+				$s['timestamp']   = (int) $titles[ $id ]['updated_ms'];
+				$s['timestamp_s'] = (int) floor( $s['timestamp'] / 1000 );
+			}
+		}
+		unset( $s );
+
+		$out = array_values( $byId );
+		if ( $project !== null && $project !== '' ) {
+			$out = array_values( array_filter( $out, fn( $s ) => ( $s['project'] ?? '' ) === $project ) );
+		}
+		usort( $out, fn( $a, $b ) => ( $b['timestamp'] ?? 0 ) <=> ( $a['timestamp'] ?? 0 ) );
+		return $out;
 	}
 
 	public static function listProjects(): array {
@@ -569,25 +632,40 @@ class CodexSessions {
 		return '';
 	}
 
-	private static function titleFromIndex( string $id ): string {
+	/**
+	 * @return array<string,array{name:string,updated_ms:int}>
+	 */
+	private static function sessionIndexMap(): array {
 		static $map = null;
-		if ( $map === null ) {
-			$map  = [];
-			$path = self::dataDir() . '/session_index.jsonl';
-			if ( is_file( $path ) ) {
-				$fh = @fopen( $path, 'r' );
-				if ( $fh ) {
-					while ( ( $line = fgets( $fh ) ) !== false ) {
-						$o = json_decode( trim( $line ), true );
-						if ( is_array( $o ) && ! empty( $o['id'] ) ) {
-							$map[ (string) $o['id'] ] = trim( (string) ( $o['thread_name'] ?? '' ) );
-						}
-					}
-					fclose( $fh );
-				}
-			}
+		if ( $map !== null ) {
+			return $map;
 		}
-		return $map[ $id ] ?? '';
+		$map  = [];
+		$path = self::dataDir() . '/session_index.jsonl';
+		if ( ! is_file( $path ) ) {
+			return $map;
+		}
+		$fh = @fopen( $path, 'r' );
+		if ( ! $fh ) {
+			return $map;
+		}
+		while ( ( $line = fgets( $fh ) ) !== false ) {
+			$o = json_decode( trim( $line ), true );
+			if ( ! is_array( $o ) || empty( $o['id'] ) ) {
+				continue;
+			}
+			$id = (string) $o['id'];
+			$map[ $id ] = [
+				'name'        => trim( (string) ( $o['thread_name'] ?? '' ) ),
+				'updated_ms'  => self::parseIsoMs( $o['updated_at'] ?? null ),
+			];
+		}
+		fclose( $fh );
+		return $map;
+	}
+
+	private static function titleFromIndex( string $id ): string {
+		return self::sessionIndexMap()[ $id ]['name'] ?? '';
 	}
 
 	/**
