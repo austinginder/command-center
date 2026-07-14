@@ -2,6 +2,17 @@
 
 All notable changes to Command Center are documented here.
 
+## [1.6.0] - 2026-07-14
+
+### Added
+
+- **Codex provider** - indexes OpenAI Codex (ChatGPT desktop / VS Code) from `~/.codex`: SQLite thread catalog, on-disk rollout JSONL, and `session_index.jsonl`. Full conversation replay (messages + tools), measured token usage from `token_count` events, model/effort chips, and open-app resume via `com.openai.codex`.
+
+### Fixed
+
+- Codex list **unions rollouts with the SQLite catalog** so ChatGPT-desktop sessions appear even when `state_5.sqlite` lags (common after the app merge).
+- Codex model chips use **`turn_context.payload.model`** (e.g. `gpt-5.5 · medium`), not bare `model_provider` (`openai`).
+
 ## [1.5.0] - 2026-07-14
 
 ### Added
