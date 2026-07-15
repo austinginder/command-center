@@ -2139,8 +2139,8 @@ function renderSessionView(sessionId) {
         }
     }
 
-    // Latest page first; walk older with the pager.
-    loadPage('last');
+    // Start at the beginning; walk forward with newer/last.
+    loadPage(0);
 }
 
 // ─── Conversation Rendering ──────────────────────────────────
