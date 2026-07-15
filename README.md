@@ -93,7 +93,7 @@ GET  /api/sessions/search/status       index health (listed / indexed / skipped 
 GET  /api/sessions/stats/daily         per-day counts + token totals
 GET  /api/sessions/stats/monthly       per-month token totals by source
 GET  /api/sessions/{id}                session meta (incl. nested subagents)
-GET  /api/sessions/{id}/conversation   full parsed conversation
+GET  /api/sessions/{id}/conversation   paginated events (default: latest 200; ?limit=&offset=)
 POST /api/sessions/search/reindex      rebuild the index
 POST /api/sessions/tokens/backfill     backfill token usage for indexed sessions
 GET  /api/retention                    retention report (?prefer= preferences)

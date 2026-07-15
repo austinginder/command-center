@@ -140,10 +140,46 @@ if ( $method === 'GET' && $path === '/sessions/search' ) {
 	exit;
 }
 
-// GET /api/sessions/{id}/conversation?source=<optional> - get full conversation
+// GET /api/sessions/{id}/conversation?source=&limit=&offset=
+// Paginated conversation events. Default is the *tail* (latest N events) so
+// huge sessions (multi-MB Grok/Claude transcripts) do not freeze the browser.
+// Response: { events, total, offset, limit, has_more_before, has_more_after }
 if ( $method === 'GET' && preg_match( '#^/sessions/([A-Za-z0-9_-]+)/conversation$#', $path, $m ) ) {
+	set_time_limit( 120 );
 	$source = $_GET['source'] ?? null;
-	echo json_encode( SessionRegistry::getConversation( $m[1], $source ?: null ) );
+	$events = SessionRegistry::getConversation( $m[1], $source ?: null );
+	if ( ! is_array( $events ) ) {
+		$events = [];
+	}
+	// Re-index numerically; some providers may leave holes.
+	$events = array_values( $events );
+	$total  = count( $events );
+
+	$limit = isset( $_GET['limit'] ) ? (int) $_GET['limit'] : 200;
+	$limit = max( 1, min( 500, $limit ) );
+
+	if ( isset( $_GET['offset'] ) && $_GET['offset'] !== '' ) {
+		$offset = max( 0, (int) $_GET['offset'] );
+	} else {
+		// Tail window: most recent $limit events (or entire session if smaller).
+		$offset = max( 0, $total - $limit );
+	}
+	if ( $offset > $total ) {
+		$offset = $total;
+	}
+
+	$slice = array_slice( $events, $offset, $limit );
+	$count = count( $slice );
+
+	echo json_encode( [
+		'events'          => $slice,
+		'total'           => $total,
+		'offset'          => $offset,
+		'limit'           => $limit,
+		'count'           => $count,
+		'has_more_before' => $offset > 0,
+		'has_more_after'  => ( $offset + $count ) < $total,
+	] );
 	exit;
 }
 

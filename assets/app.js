@@ -1,6 +1,7 @@
 // ─── State ───────────────────────────────────────────────────
 const state = {
-    sessionEs: null, // EventSource for the session viewer
+    sessionEs: null,   // legacy EventSource handle (if any)
+    sessionConv: null, // active session viewer pagination state
 };
 
 // ─── Router ──────────────────────────────────────────────────
@@ -54,6 +55,10 @@ function onViewLeave() {
     if (state.sessionEs) {
         state.sessionEs.close();
         state.sessionEs = null;
+    }
+    if (state.sessionConv) {
+        state.sessionConv.gen = (state.sessionConv.gen || 0) + 1;
+        state.sessionConv = null;
     }
 }
 
@@ -1971,34 +1976,182 @@ function renderSessionView(sessionId) {
         })
         .catch(() => {});
 
-    // Stream the conversation (replays history, then closes).
-    const log = document.getElementById('session-log');
-    const es = new EventSource('/stream?session=' + encodeURIComponent(sessionId) + sourceQs);
+    // Paginated conversation load (default: latest PAGE of events). Full SSE
+    // replay freezes the tab on large Grok/Claude sessions (thousands of tools).
+    const PAGE = 200;
+    const logShell = document.getElementById('session-log');
+    logShell.innerHTML = `
+        <div id="session-log-pager" class="hidden -mx-4 sm:-mx-6 -mt-5 mb-4 px-4 sm:px-6 py-2.5 border-b border-zinc-100 dark:border-cc-line2 flex flex-wrap items-center gap-2 text-xs font-mono text-zinc-500 dark:text-cc-dim"></div>
+        <div id="session-log-status" class="py-6 text-center text-xs font-mono text-zinc-400 dark:text-cc-dim">loading conversation…</div>
+        <div id="session-log-body" class="space-y-1"></div>
+    `;
+    const pager = document.getElementById('session-log-pager');
+    const status = document.getElementById('session-log-status');
+    const log = document.getElementById('session-log-body');
 
-    es.addEventListener('summary', e => {
-        const d = JSON.parse(e.data);
-        const div = document.createElement('div');
-        div.className = 'text-zinc-500 italic text-xs py-1 mb-3 border-b border-zinc-100 dark:border-cc-line';
-        div.innerHTML = '<strong>Summary:</strong> ' + esc(d.text);
-        log.prepend(div);
-    });
+    const convState = {
+        total: 0,
+        startOffset: 0, // first event index currently in the DOM
+        endOffset: 0,   // exclusive
+        loading: false,
+        gen: 0, // bump on navigate-away to drop stale responses
+    };
+    state.sessionConv = convState;
 
-    es.addEventListener('user_message', e => appendUserMessage(log, JSON.parse(e.data).text));
-    es.addEventListener('text', e => appendEntry(log, 'text', JSON.parse(e.data).text));
-    es.addEventListener('tool_call', e => appendToolCall(log, JSON.parse(e.data)));
-    es.addEventListener('tool_result', e => {
-        const d = JSON.parse(e.data);
-        if (d.preview) appendResult(log, d);
-    });
-    es.addEventListener('complete', e => appendComplete(log, JSON.parse(e.data)));
-    es.addEventListener('done', () => {
-        collapseToolGroup(log);
-        es.close();
-        state.sessionEs = null;
-    });
-    es.onerror = () => {};
+    function pageLabel() {
+        if (!convState.total) return 'empty conversation';
+        const from = convState.startOffset + 1;
+        const to = convState.endOffset;
+        return `events ${from}-${to} of ${convState.total}`;
+    }
 
-    state.sessionEs = es;
+    function renderPager() {
+        if (!pager) return;
+        const show = convState.total > (convState.endOffset - convState.startOffset) || convState.startOffset > 0;
+        if (!show) {
+            pager.classList.add('hidden');
+            pager.innerHTML = '';
+            return;
+        }
+        pager.classList.remove('hidden');
+        const earlier = convState.startOffset > 0;
+        pager.innerHTML = `
+            <button type="button" id="session-load-earlier" class="px-2 py-1 rounded border border-zinc-200 dark:border-cc-line3 bg-white dark:bg-cc-card text-zinc-600 dark:text-cc-soft hover:border-zinc-400 dark:hover:border-[#2a3830] disabled:opacity-40 disabled:cursor-not-allowed transition-colors" ${earlier && !convState.loading ? '' : 'disabled'}>
+                ${convState.loading ? 'loading…' : '↑ load earlier'}
+            </button>
+            <span class="text-zinc-400 dark:text-cc-dim">${esc(pageLabel())}</span>
+            <span class="text-zinc-300 dark:text-cc-dim hidden sm:inline">large sessions open on the latest window</span>
+        `;
+        const btn = document.getElementById('session-load-earlier');
+        if (btn && earlier) {
+            btn.addEventListener('click', () => loadConversationPage({ earlier: true }));
+        }
+    }
+
+    function applyEvents(events, { prepend } = {}) {
+        const frag = document.createDocumentFragment();
+        // Temporary host so append* helpers can use lastElementChild for tool groups.
+        const host = document.createElement('div');
+        host.className = 'space-y-1';
+        for (const ev of events) {
+            const type = ev && ev.type;
+            if (!type || type === 'init') continue;
+            if (type === 'user_message') appendUserMessage(host, ev.text || '');
+            else if (type === 'text') appendEntry(host, 'text', ev.text || '');
+            else if (type === 'tool_call') appendToolCall(host, ev);
+            else if (type === 'tool_result') {
+                if (ev.preview) appendResult(host, ev);
+            } else if (type === 'complete') appendComplete(host, ev);
+            else if (type === 'summary' && ev.text) {
+                const div = document.createElement('div');
+                div.className = 'text-zinc-500 italic text-xs py-1 mb-3 border-b border-zinc-100 dark:border-cc-line';
+                div.innerHTML = '<strong>Summary:</strong> ' + esc(ev.text);
+                host.appendChild(div);
+            }
+        }
+        collapseToolGroup(host);
+        while (host.firstChild) frag.appendChild(host.firstChild);
+        if (prepend) {
+            log.insertBefore(frag, log.firstChild);
+        } else {
+            log.appendChild(frag);
+        }
+    }
+
+    async function loadConversationPage({ earlier } = {}) {
+        if (convState.loading) return;
+        const gen = convState.gen;
+        convState.loading = true;
+        renderPager();
+
+        const params = new URLSearchParams();
+        params.set('limit', String(PAGE));
+        if (source) params.set('source', source);
+        if (earlier) {
+            const nextOffset = Math.max(0, convState.startOffset - PAGE);
+            // Only fetch the slice not already loaded.
+            const need = convState.startOffset - nextOffset;
+            if (need <= 0) {
+                convState.loading = false;
+                renderPager();
+                return;
+            }
+            params.set('offset', String(nextOffset));
+            params.set('limit', String(need));
+        }
+        // else: omit offset -> server returns tail window
+        const url = '/api/sessions/' + encodeURIComponent(sessionId) + '/conversation?' + params.toString();
+
+        if (status && !earlier) {
+            status.classList.remove('hidden');
+            status.textContent = 'loading conversation…';
+        }
+
+        try {
+            const r = await fetch(url);
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const data = await r.json();
+            if (gen !== convState.gen) return; // navigated away
+
+            const events = Array.isArray(data.events) ? data.events : (Array.isArray(data) ? data : []);
+            const pageOffset = data.offset != null ? data.offset : 0;
+            const pageCount = data.count != null ? data.count : events.length;
+            convState.total = data.total != null ? data.total : events.length;
+
+            if (status) {
+                status.classList.add('hidden');
+                status.textContent = '';
+            }
+
+            if (earlier) {
+                // Preserve scroll position when prepending.
+                const prevHeight = log.scrollHeight;
+                applyEvents(events, { prepend: true });
+                const root = document.scrollingElement || document.documentElement;
+                root.scrollTop += (log.scrollHeight - prevHeight);
+                convState.startOffset = pageOffset;
+                // endOffset unchanged
+            } else {
+                log.innerHTML = '';
+                convState.startOffset = pageOffset;
+                convState.endOffset = pageOffset + pageCount;
+                // Batch large pages so the first paint is quick.
+                const chunk = 50;
+                if (events.length <= chunk) {
+                    applyEvents(events);
+                } else {
+                    let i = 0;
+                    await new Promise(resolve => {
+                        function step() {
+                            if (gen !== convState.gen) { resolve(); return; }
+                            applyEvents(events.slice(i, i + chunk));
+                            i += chunk;
+                            if (i < events.length) requestAnimationFrame(step);
+                            else resolve();
+                        }
+                        requestAnimationFrame(step);
+                    });
+                }
+            }
+
+            if (!events.length && !earlier) {
+                log.innerHTML = `<div class="py-6 text-center text-xs font-mono text-zinc-400 dark:text-cc-dim">no conversation events</div>`;
+            }
+        } catch (err) {
+            if (gen !== convState.gen) return;
+            if (status) {
+                status.classList.remove('hidden');
+                status.textContent = 'failed to load conversation';
+            }
+        } finally {
+            if (gen === convState.gen) {
+                convState.loading = false;
+                renderPager();
+            }
+        }
+    }
+
+    loadConversationPage();
 }
 
 // ─── Conversation Rendering ──────────────────────────────────
@@ -2121,7 +2274,12 @@ function appendResult(log, data) {
     summary.textContent = 'output (' + formatBytes(data.length || text.length) + ')';
     const content = document.createElement('div');
     content.className = 'md-body mt-1 text-xs text-zinc-500 dark:text-cc-mut max-h-48 overflow-y-auto bg-zinc-50 dark:bg-cc-bg rounded p-2 border border-zinc-100 dark:border-cc-line';
-    content.innerHTML = marked.parse(text, { breaks: true });
+    // Lazy markdown: parsing thousands of tool outputs on open freezes the tab.
+    details.addEventListener('toggle', () => {
+        if (!details.open || content.dataset.rendered) return;
+        content.dataset.rendered = '1';
+        content.innerHTML = marked.parse(text, { breaks: true });
+    });
     details.appendChild(summary);
     details.appendChild(content);
     group.appendChild(details);
