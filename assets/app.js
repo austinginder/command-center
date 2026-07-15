@@ -64,6 +64,9 @@ function onViewLeave() {
         if (state.sessionConv._onResize) {
             window.removeEventListener('resize', state.sessionConv._onResize);
         }
+        if (state.sessionConv._io) {
+            try { state.sessionConv._io.disconnect(); } catch (e) {}
+        }
         state.sessionConv = null;
     }
 }
@@ -1982,52 +1985,65 @@ function renderSessionView(sessionId) {
         })
         .catch(() => {});
 
-    // Window-scroll virtual list: page scrolls normally; only viewport rows
-    // are mounted. Scroll toward the top to auto-load earlier pages.
+    // Window-scroll virtual list with bidirectional window loading.
+    // Page scrolls normally; only viewport rows mount. Scroll toward either
+    // edge of the loaded range to fetch more. "Oldest" jumps to event 0.
     const PAGE = 250;
-    const OVERSCAN_PX = 800;
+    const OVERSCAN_PX = 900;
+    const EDGE_PX = 480; // how close to loaded-range edge before fetching more
     const logShell = document.getElementById('session-log');
     logShell.innerHTML = `
-        <div id="session-log-pager" class="sticky top-0 z-10 px-4 sm:px-6 py-2 border-b border-zinc-100 dark:border-cc-line2 flex flex-wrap items-center gap-2 text-xs font-mono text-zinc-500 dark:text-cc-dim bg-white/95 dark:bg-cc-card/95 backdrop-blur-sm rounded-t-xl">
+        <div id="session-log-pager" class="sticky top-0 z-10 px-4 sm:px-6 py-2 border-b border-zinc-100 dark:border-cc-line2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs font-mono text-zinc-500 dark:text-cc-dim bg-white/95 dark:bg-cc-card/95 backdrop-blur-sm rounded-t-xl">
             <span id="session-log-pager-label">loading conversation…</span>
+            <span class="flex items-center gap-1.5 ml-auto">
+                <button type="button" id="session-jump-start" class="px-2 py-0.5 rounded border border-zinc-200 dark:border-cc-line3 bg-white dark:bg-cc-card text-zinc-600 dark:text-cc-soft hover:border-zinc-400 dark:hover:border-[#2a3830] disabled:opacity-40 transition-colors">oldest</button>
+                <button type="button" id="session-jump-end" class="px-2 py-0.5 rounded border border-zinc-200 dark:border-cc-line3 bg-white dark:bg-cc-card text-zinc-600 dark:text-cc-soft hover:border-zinc-400 dark:hover:border-[#2a3830] disabled:opacity-40 transition-colors">latest</button>
+            </span>
         </div>
         <div id="session-log-list" class="px-4 sm:px-6 py-4">
+            <div id="session-log-top-sentinel" class="h-px w-full" aria-hidden="true"></div>
             <div id="session-log-spacer-top"></div>
             <div id="session-log-body" class="space-y-1"></div>
             <div id="session-log-spacer-bottom"></div>
+            <div id="session-log-bot-sentinel" class="h-px w-full" aria-hidden="true"></div>
         </div>
     `;
     const pagerLabel = document.getElementById('session-log-pager-label');
+    const jumpStartBtn = document.getElementById('session-jump-start');
+    const jumpEndBtn = document.getElementById('session-jump-end');
     const listEl = document.getElementById('session-log-list');
+    const topSentinel = document.getElementById('session-log-top-sentinel');
+    const botSentinel = document.getElementById('session-log-bot-sentinel');
     const spacerTop = document.getElementById('session-log-spacer-top');
     const spacerBot = document.getElementById('session-log-spacer-bottom');
     const body = document.getElementById('session-log-body');
 
     const convState = {
-        total: 0,          // total events on server
-        startOffset: 0,    // first loaded event index
-        endOffset: 0,      // exclusive end of loaded event range
-        events: [],        // loaded events (contiguous)
-        rows: [],          // coalesced display rows for virtual list
-        heights: [],       // estimated/measured height per row
+        total: 0,
+        startOffset: 0,
+        endOffset: 0,
+        events: [],
+        rows: [],
+        heights: [],
         loading: false,
+        loadDir: null, // 'earlier' | 'later' | 'replace'
         gen: 0,
         paintStart: -1,
         paintEnd: -1,
         _onScroll: null,
         _onResize: null,
+        _io: null,
     };
     state.sessionConv = convState;
 
     function estimateRowHeight(row) {
         if (row.kind === 'tools') {
             const n = row.tools.length;
-            // summary line + one row per tool (+ collapsed output line when present)
             let h = 22 + n * 22;
             for (const t of row.tools) {
                 if (t.result && t.result.preview) h += 18;
             }
-            return h;
+            return Math.min(h, 2400); // cap so one mega tool-group cannot dominate scroll math
         }
         if (row.kind === 'user_message') {
             const len = (row.ev.text || '').length;
@@ -2053,7 +2069,8 @@ function renderSessionView(sessionId) {
             }
             if (ev.type === 'tool_call' || ev.type === 'tool_result') {
                 const tools = [];
-                while (i < events.length) {
+                // Cap tool-group size so virtual rows stay manageable.
+                while (i < events.length && tools.length < 40) {
                     const e = events[i];
                     if (!e || (e.type !== 'tool_call' && e.type !== 'tool_result')) break;
                     if (e.type === 'tool_call') {
@@ -2063,6 +2080,7 @@ function renderSessionView(sessionId) {
                     }
                     i++;
                 }
+                // Flush remaining tool events of this run into more groups.
                 if (tools.length) rows.push({ kind: 'tools', tools });
                 continue;
             }
@@ -2080,19 +2098,11 @@ function renderSessionView(sessionId) {
     }
 
     function rebuildRows() {
-        const prevLen = convState.rows.length;
-        const prevHeights = convState.heights;
+        // Always rebuild heights from estimates. Coalescing across page
+        // boundaries invalidates any "keep measured" prepend bookkeeping.
         const rows = coalesceEvents(convState.events);
-        // Prepend path: keep measured heights for rows that already existed.
-        if (prevLen > 0 && rows.length > prevLen && prevHeights.length === prevLen) {
-            const added = rows.length - prevLen;
-            const newHeights = [];
-            for (let i = 0; i < added; i++) newHeights.push(estimateRowHeight(rows[i]));
-            convState.heights = newHeights.concat(prevHeights);
-        } else {
-            convState.heights = rows.map(estimateRowHeight);
-        }
         convState.rows = rows;
+        convState.heights = rows.map(estimateRowHeight);
         convState.paintStart = -1;
         convState.paintEnd = -1;
     }
@@ -2107,18 +2117,29 @@ function renderSessionView(sessionId) {
         if (!pagerLabel) return;
         if (!convState.total && !convState.events.length) {
             pagerLabel.textContent = convState.loading ? 'loading conversation…' : 'empty conversation';
+            if (jumpStartBtn) jumpStartBtn.disabled = true;
+            if (jumpEndBtn) jumpEndBtn.disabled = true;
             return;
         }
-        const from = convState.startOffset + 1;
+        const from = convState.events.length ? convState.startOffset + 1 : 0;
         const to = convState.endOffset;
-        const loaded = convState.endOffset - convState.startOffset;
         let msg = `events ${from}-${to} of ${convState.total}`;
-        if (convState.startOffset > 0) {
-            msg += convState.loading ? ' · loading earlier…' : ' · scroll up for earlier';
-        } else if (loaded >= convState.total && convState.total > 0) {
+        if (convState.loading) {
+            msg += convState.loadDir === 'earlier' ? ' · loading earlier…'
+                : convState.loadDir === 'later' ? ' · loading later…'
+                : ' · loading…';
+        } else if (convState.startOffset > 0 && convState.endOffset < convState.total) {
+            msg += ' · scroll for more';
+        } else if (convState.startOffset > 0) {
+            msg += ' · scroll up for earlier';
+        } else if (convState.endOffset < convState.total) {
+            msg += ' · scroll down for later';
+        } else if (convState.total > 0) {
             msg += ' · full session loaded';
         }
         pagerLabel.textContent = msg;
+        if (jumpStartBtn) jumpStartBtn.disabled = !!convState.loading || convState.startOffset <= 0;
+        if (jumpEndBtn) jumpEndBtn.disabled = !!convState.loading || convState.endOffset >= convState.total;
     }
 
     function materializeRow(row) {
@@ -2145,10 +2166,13 @@ function renderSessionView(sessionId) {
         return host;
     }
 
-    /** Page Y of the top of the virtual list (document coordinates). */
     function listOriginY() {
         const rect = listEl.getBoundingClientRect();
         return rect.top + window.scrollY;
+    }
+
+    function localScrollTop() {
+        return window.scrollY - listOriginY();
     }
 
     function paint(force) {
@@ -2156,13 +2180,14 @@ function renderSessionView(sessionId) {
         if (!rows.length) {
             spacerTop.style.height = '0px';
             spacerBot.style.height = '0px';
-            body.innerHTML = '';
+            if (!convState.loading) {
+                body.innerHTML = `<div class="py-6 text-center text-xs font-mono text-zinc-400 dark:text-cc-dim">no conversation events</div>`;
+            }
             convState.paintStart = -1;
             convState.paintEnd = -1;
             return;
         }
 
-        // Map the window viewport into list-local coordinates.
         const origin = listOriginY();
         const viewTop = window.scrollY;
         const viewBot = viewTop + window.innerHeight;
@@ -2182,7 +2207,6 @@ function renderSessionView(sessionId) {
             acc += convState.heights[end];
             end++;
         }
-        // Always mount at least a few rows when the list is on-screen.
         if (end === start) end = Math.min(rows.length, start + 1);
 
         const botPad = Math.max(0, contentH - acc);
@@ -2204,7 +2228,6 @@ function renderSessionView(sessionId) {
         body.innerHTML = '';
         body.appendChild(frag);
 
-        // Refine heights from real layout (once per paint range).
         requestAnimationFrame(() => {
             if (state.sessionConv !== convState) return;
             let changed = false;
@@ -2225,53 +2248,101 @@ function renderSessionView(sessionId) {
                 for (let i = convState.paintStart; i < convState.paintEnd; i++) mid += convState.heights[i];
                 spacerTop.style.height = a + 'px';
                 spacerBot.style.height = Math.max(0, totalHeight() - a - mid) + 'px';
-                // Keep page scroll stable if layout shifted.
                 if (Math.abs(window.scrollY - st) > 1) window.scrollTo(0, st);
             }
         });
     }
 
-    function onScroll() {
-        if (state.sessionConv !== convState) return;
-        paint(false);
-        // Infinite load earlier when the top of the loaded range nears the viewport.
-        if (convState.startOffset > 0 && !convState.loading) {
-            const origin = listOriginY();
-            const localTop = window.scrollY - origin;
-            if (localTop < 240) {
-                loadConversationPage({ earlier: true });
-            }
+    function maybeLoadMore() {
+        if (convState.loading || !convState.events.length) return;
+        const localTop = localScrollTop();
+        const contentH = totalHeight();
+        const viewH = window.innerHeight;
+        // Near top of loaded range -> fetch earlier.
+        if (convState.startOffset > 0 && localTop < EDGE_PX) {
+            loadConversation({ direction: 'earlier' });
+            return;
+        }
+        // Near bottom of loaded range -> fetch later.
+        if (convState.endOffset < convState.total && localTop + viewH > contentH - EDGE_PX) {
+            loadConversation({ direction: 'later' });
         }
     }
 
+    function onScroll() {
+        if (state.sessionConv !== convState) return;
+        paint(false);
+        maybeLoadMore();
+    }
+
     convState._onScroll = onScroll;
-    convState._onResize = () => paint(true);
+    convState._onResize = () => { paint(true); maybeLoadMore(); };
     window.addEventListener('scroll', convState._onScroll, { passive: true });
     window.addEventListener('resize', convState._onResize, { passive: true });
 
-    async function loadConversationPage({ earlier } = {}) {
+    // IntersectionObserver is more reliable than scroll thresholds alone.
+    if (typeof IntersectionObserver === 'function') {
+        convState._io = new IntersectionObserver((entries) => {
+            if (state.sessionConv !== convState || convState.loading) return;
+            for (const ent of entries) {
+                if (!ent.isIntersecting) continue;
+                if (ent.target === topSentinel && convState.startOffset > 0) {
+                    loadConversation({ direction: 'earlier' });
+                } else if (ent.target === botSentinel && convState.endOffset < convState.total) {
+                    loadConversation({ direction: 'later' });
+                }
+            }
+        }, { root: null, rootMargin: '400px 0px', threshold: 0 });
+        convState._io.observe(topSentinel);
+        convState._io.observe(botSentinel);
+    }
+
+    if (jumpStartBtn) {
+        jumpStartBtn.addEventListener('click', () => loadConversation({ direction: 'replace', offset: 0, scrollTo: 'start' }));
+    }
+    if (jumpEndBtn) {
+        jumpEndBtn.addEventListener('click', () => loadConversation({ direction: 'replace', scrollTo: 'end' }));
+    }
+
+    /**
+     * @param {{ direction: 'earlier'|'later'|'replace', offset?: number, scrollTo?: 'start'|'end'|'keep' }} opts
+     */
+    async function loadConversation(opts) {
+        const direction = opts.direction || 'replace';
         if (convState.loading) return;
-        if (earlier && convState.startOffset <= 0) return;
+        if (direction === 'earlier' && convState.startOffset <= 0) return;
+        if (direction === 'later' && convState.endOffset >= convState.total && convState.total > 0) return;
+
         const gen = convState.gen;
         convState.loading = true;
+        convState.loadDir = direction;
         updatePager();
 
         const params = new URLSearchParams();
         if (source) params.set('source', source);
-        if (earlier) {
+
+        if (direction === 'earlier') {
             const nextOffset = Math.max(0, convState.startOffset - PAGE);
             const need = convState.startOffset - nextOffset;
             if (need <= 0) {
                 convState.loading = false;
+                convState.loadDir = null;
                 updatePager();
                 return;
             }
             params.set('offset', String(nextOffset));
             params.set('limit', String(need));
-        } else {
+        } else if (direction === 'later') {
+            params.set('offset', String(convState.endOffset));
             params.set('limit', String(PAGE));
-            // omit offset -> server tail
+        } else if (opts.offset != null) {
+            params.set('offset', String(opts.offset));
+            params.set('limit', String(PAGE));
+        } else {
+            // replace + no offset = server tail
+            params.set('limit', String(PAGE));
         }
+
         const url = '/api/sessions/' + encodeURIComponent(sessionId) + '/conversation?' + params.toString();
 
         try {
@@ -2285,50 +2356,76 @@ function renderSessionView(sessionId) {
             const pageCount = data.count != null ? data.count : events.length;
             convState.total = data.total != null ? data.total : events.length;
 
-            if (earlier) {
-                const prevY = window.scrollY;
-                const prevH = totalHeight();
-                convState.events = events.concat(convState.events);
-                convState.startOffset = pageOffset;
-                rebuildRows();
-                const addedH = totalHeight() - prevH;
-                paint(true);
-                // Keep the same content under the viewport while prepending.
-                window.scrollTo(0, prevY + Math.max(0, addedH));
-                paint(true);
+            if (direction === 'earlier') {
+                if (!events.length) {
+                    // Nothing more - clamp start so we do not loop forever.
+                    convState.startOffset = Math.min(convState.startOffset, pageOffset);
+                } else {
+                    const prevY = window.scrollY;
+                    const prevH = totalHeight();
+                    const anchorLocal = localScrollTop();
+                    convState.events = events.concat(convState.events);
+                    convState.startOffset = pageOffset;
+                    rebuildRows();
+                    paint(true);
+                    // Prefer anchor via local offset so header/sticky shifts do not desync.
+                    const newOrigin = listOriginY();
+                    const addedH = totalHeight() - prevH;
+                    const targetY = (Number.isFinite(anchorLocal) ? newOrigin + anchorLocal + Math.max(0, addedH) : prevY + Math.max(0, addedH));
+                    window.scrollTo(0, Math.max(0, targetY));
+                    paint(true);
+                }
+            } else if (direction === 'later') {
+                if (events.length) {
+                    convState.events = convState.events.concat(events);
+                    convState.endOffset = pageOffset + pageCount;
+                    rebuildRows();
+                    paint(true);
+                } else {
+                    convState.endOffset = Math.max(convState.endOffset, pageOffset);
+                }
             } else {
+                // replace window
                 convState.events = events.slice();
                 convState.startOffset = pageOffset;
                 convState.endOffset = pageOffset + pageCount;
                 rebuildRows();
                 paint(true);
-                // Land at the latest activity (page scroll).
+                const scrollTo = opts.scrollTo || 'end';
                 requestAnimationFrame(() => {
                     if (state.sessionConv !== convState) return;
-                    const origin = listOriginY();
-                    const target = origin + totalHeight() - window.innerHeight + 48;
-                    window.scrollTo(0, Math.max(0, target));
+                    if (scrollTo === 'start') {
+                        const origin = listOriginY();
+                        // Sit just under the sticky pager.
+                        window.scrollTo(0, Math.max(0, origin - 56));
+                    } else if (scrollTo === 'end') {
+                        const origin = listOriginY();
+                        window.scrollTo(0, Math.max(0, origin + totalHeight() - window.innerHeight + 48));
+                    }
                     paint(true);
                 });
             }
-
-            if (!earlier && !events.length) {
-                body.innerHTML = `<div class="py-6 text-center text-xs font-mono text-zinc-400 dark:text-cc-dim">no conversation events</div>`;
-            }
         } catch (err) {
             if (gen !== convState.gen) return;
-            if (!earlier) {
+            if (direction === 'replace') {
                 pagerLabel.textContent = 'failed to load conversation';
             }
         } finally {
             if (gen === convState.gen) {
                 convState.loading = false;
+                convState.loadDir = null;
                 updatePager();
+                // If the user is still parked at an edge, keep filling the window.
+                requestAnimationFrame(() => {
+                    if (state.sessionConv !== convState) return;
+                    maybeLoadMore();
+                });
             }
         }
     }
 
-    loadConversationPage();
+    // Initial: latest window, scrolled to end.
+    loadConversation({ direction: 'replace', scrollTo: 'end' });
 }
 
 // ─── Conversation Rendering ──────────────────────────────────
