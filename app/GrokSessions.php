@@ -9,7 +9,7 @@
  *     summary.json          - title, timestamps, model, message counts, session_kind,
  *                             reasoning_effort, agent_name (persona/role)
  *     updates.jsonl         - ACP session/update stream (authoritative conversation)
- *     signals.json          - aggregated counters (tokens, tools, duration, lines)
+ *     signals.json          - counters: context tokens, duration, turns, tools, LOC
  *     chat_history.jsonl    - raw model messages (not used for UI replay)
  *     plan.json / rewind_points.jsonl / subagents/ …
  *
@@ -776,6 +776,9 @@ class GrokSessions {
 			$record['agent_name'] = $agentName;
 		}
 
+		// signals.json rollup: duration, turns, tools, LOC (cheap small JSON).
+		self::attachSignalsRollup( $record, $sessionDir );
+
 		// Live chip when ~/.grok/active_sessions.json lists this session with a live PID.
 		$live = self::activeSessionMeta( $id );
 		if ( $live ) {
@@ -794,6 +797,67 @@ class GrokSessions {
 		}
 
 		return $record;
+	}
+
+	/**
+	 * Fold high-signal fields from signals.json into a session record.
+	 *
+	 * Not measured billable tokens (still estimated via extractUsage). These are
+	 * Grok's local activity counters: wall time, turns, tool calls, agent LOC.
+	 *
+	 * @param array  $record     Session record (mutated).
+	 * @param string $sessionDir Absolute session directory.
+	 */
+	private static function attachSignalsRollup( array &$record, string $sessionDir ): void {
+		$signals = self::readJson( $sessionDir . '/signals.json' );
+		if ( ! is_array( $signals ) ) {
+			return;
+		}
+
+		$durS = (int) ( $signals['sessionDurationSeconds'] ?? 0 );
+		if ( $durS > 0 ) {
+			// Match subagent meta which already uses duration_ms.
+			$record['duration_ms'] = $durS * 1000;
+		}
+
+		$turns = (int) ( $signals['turnCount'] ?? 0 );
+		if ( $turns > 0 ) {
+			$record['turn_count'] = $turns;
+		}
+
+		$toolCalls = (int) ( $signals['toolCallCount'] ?? 0 );
+		if ( $toolCalls > 0 ) {
+			$record['tool_calls'] = $toolCalls;
+		}
+
+		$added   = (int) ( $signals['agentLinesAdded'] ?? 0 );
+		$removed = (int) ( $signals['agentLinesRemoved'] ?? 0 );
+		if ( $added !== 0 || $removed !== 0 ) {
+			$record['agent_lines_added']   = $added;
+			$record['agent_lines_removed'] = $removed;
+		}
+
+		$files = (int) ( $signals['agentFilesTouched'] ?? $signals['totalFilesTouched'] ?? 0 );
+		if ( $files > 0 ) {
+			$record['files_touched'] = $files;
+		}
+
+		$toolsUsed = $signals['toolsUsed'] ?? null;
+		if ( is_array( $toolsUsed ) && $toolsUsed ) {
+			$clean = [];
+			foreach ( $toolsUsed as $t ) {
+				$t = trim( (string) $t );
+				if ( $t !== '' ) {
+					$clean[] = $t;
+				}
+				if ( count( $clean ) >= 24 ) {
+					break;
+				}
+			}
+			if ( $clean ) {
+				$record['tools_used'] = $clean;
+			}
+		}
 	}
 
 	/**

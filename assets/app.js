@@ -248,7 +248,27 @@ function formatDurationMs(ms) {
     const rem = s % 60;
     if (m < 60) return rem ? `${m}m ${rem}s` : `${m}m`;
     const h = Math.floor(m / 60);
-    return `${h}h ${m % 60}m`;
+    if (h < 48) return `${h}h ${m % 60}m`;
+    const d = Math.floor(h / 24);
+    return `${d}d ${h % 24}h`;
+}
+
+/** Compact weight label: duration and/or byte size for list rows. */
+function sessionWeightLabel(s) {
+    if (!s) return '';
+    const parts = [];
+    if (s.duration_ms != null && s.duration_ms > 0) parts.push(formatDurationMs(s.duration_ms));
+    if (s.size) parts.push(formatBytes(s.size));
+    return parts.join(' · ');
+}
+
+/** LOC chip from agent_lines_added / agent_lines_removed (Grok signals). */
+function locLabel(s) {
+    if (!s) return '';
+    const a = Number(s.agent_lines_added) || 0;
+    const r = Math.abs(Number(s.agent_lines_removed) || 0);
+    if (!a && !r) return '';
+    return `+${a}/-${r} lines`;
 }
 
 function subagentStatusDot(status) {
@@ -1094,7 +1114,7 @@ function renderDashboard() {
             ${countBadge}
             ${retentionBadge(s, showRetentionBadges())}
             <span class="hidden md:block max-w-[240px] truncate text-xs font-mono text-zinc-400 dark:text-cc-dim" title="${esc(shortPath(s.project) || '')}">${esc(projectLabel(s.project) || s.projectName || '')}</span>
-            <span class="hidden sm:block w-20 text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap">${s.size ? formatBytes(s.size) : ''}</span>
+            <span class="hidden sm:block min-w-[5rem] max-w-[9rem] text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap truncate" title="${esc(sessionWeightLabel(s))}">${esc(sessionWeightLabel(s))}</span>
             <span class="text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap" style="width:4.5rem">${s.timestamp_s ? clockTime(s.timestamp_s) : ''}</span>
             ${copyBtnHtml(src, s.project, s.id, s.environmentId, s.display)}
         </div>`;
@@ -1901,6 +1921,12 @@ function renderSessionView(sessionId) {
                 if (s.agent_name && String(s.agent_name).toLowerCase() !== 'general-purpose') {
                     parts.push(s.agent_name);
                 }
+                if (s.duration_ms != null && s.duration_ms > 0) parts.push(formatDurationMs(s.duration_ms));
+                if (s.turn_count) parts.push(s.turn_count + (s.turn_count === 1 ? ' turn' : ' turns'));
+                if (s.tool_calls != null) parts.push(s.tool_calls + (s.tool_calls === 1 ? ' tool' : ' tools'));
+                const loc = locLabel(s);
+                if (loc) parts.push(loc);
+                if (s.files_touched) parts.push(s.files_touched + (s.files_touched === 1 ? ' file' : ' files'));
                 if (s.originator) parts.push(s.originator);
                 else if (s.codex_source) parts.push(s.codex_source);
                 if (s.cli_version) parts.push('cli ' + s.cli_version);
@@ -1910,6 +1936,9 @@ function renderSessionView(sessionId) {
                 if (s.size) parts.push(formatBytes(s.size));
                 if (s.parent_id) parts.push('parent ' + s.parent_id.slice(0, 8));
                 meta.textContent = parts.join(' · ');
+                if (Array.isArray(s.tools_used) && s.tools_used.length) {
+                    meta.title = 'Tools: ' + s.tools_used.join(', ');
+                }
             }
 
             renderSessionChildren(s);
