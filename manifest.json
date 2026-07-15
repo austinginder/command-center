@@ -2,10 +2,10 @@
     "name": "Command Center",
     "slug": "command-center",
     "author": "Austin Ginder",
-    "version": "1.6.0",
-    "download_url": "https://github.com/austinginder/command-center/archive/refs/tags/v1.6.0.zip",
+    "version": "1.7.0",
+    "download_url": "https://github.com/austinginder/command-center/archive/refs/tags/v1.7.0.zip",
     "requires_php": "8.1",
-    "last_updated": "2026-07-14 18:00:00",
+    "last_updated": "2026-07-15 19:00:00",
     "homepage": "https://commandcenter.run",
     "repository": "https://github.com/austinginder/command-center",
     "changelog": "https://github.com/austinginder/command-center/blob/main/CHANGELOG.md"

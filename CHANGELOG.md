@@ -2,6 +2,25 @@
 
 All notable changes to Command Center are documented here.
 
+## [1.7.0] - 2026-07-15
+
+### Added
+
+- **Conversation pagination** - large sessions load in pages of 1000 events (first/older/newer/last). Avoids freezing the browser on multi-thousand-tool Grok/Claude transcripts. Opens on page 1 (start of the conversation) and scrolls the window to the top.
+- **Grok session metadata** - list/detail show `reasoning_effort` and non-default `agent_name` (persona/role). Signals rollup adds duration, turn/tool counts, agent LOC, and files touched when `signals.json` is present.
+- **`GET /api/sessions/{id}/conversation`** returns a paginated envelope: `{ events, total, offset, limit, count, has_more_before, has_more_after }` (`limit` max 1000).
+
+### Improved
+
+- **SPA dashboard park** - opening a session parks the homepage DOM (heatmap, filters, list, scroll) and restores it on back so the heatmap does not remount or refetch.
+- **Index health UI** - listed/indexed/skipped/stale/size moved out of the nav into a compact popover next to reindex on the dashboard (amber flag when skipped or stale).
+- Grok model chips include effort (e.g. `grok-4.5 · high`) via the shared model badge path.
+- Lazy tool-output markdown: results parse only when expanded.
+
+### Fixed
+
+- Huge session viewers no longer stream every event into the DOM via SSE (that path remains available at `/stream` for API use).
+
 ## [1.6.0] - 2026-07-14
 
 ### Added

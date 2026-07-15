@@ -27,12 +27,13 @@ Tools you don't use are skipped automatically. Each location can be overridden w
 
 - **Session index** - every session from every tool in one reverse-chronological list, grouped by day, filterable by tool and project. Nested subagents expand under their parent where the tool records them.
 - **Deep search** - SQLite FTS5 full-text search across conversation content, with snippets and highlighting. The index updates incrementally; only changed sessions are re-read. Status shows listed / indexed / skipped / stale coverage.
-- **Session viewer** - replay any conversation: user messages, assistant responses, collapsible tool-call groups, and turn summaries.
+- **Session viewer** - replay any conversation: user messages, assistant responses, collapsible tool-call groups, and turn summaries. Large sessions paginate (1000 events per page) so the tab stays responsive.
 - **Resume commands** - one click copies the exact CLI command to resume a session in its original tool and project directory (OpenCode, Kimi, Claude, Grok, and others; T3 opens the desktop app).
-- **Activity heatmap + usage** - GitHub-style sessions-per-day graph with token tooltips; monthly usage page for input / output / cache across providers.
+- **Activity heatmap + usage** - GitHub-style sessions-per-day graph with token tooltips; monthly usage page for input / output / cache across providers. Opening a session parks the dashboard DOM so back restores it without refetching.
 - **Token tracking** - recorded usage where tools expose it; estimated usage for Command Code, T3 Code, and Grok.
 - **Retention monitor** - optional per-provider TTL warnings when agent tools auto-delete old transcripts.
-- **Model + live chips** - model labels on list rows when available; Grok shows a live badge for sessions still running.
+- **Model + live chips** - model labels on list rows when available (Grok includes reasoning effort); Grok shows a live badge for sessions still running, plus duration/tools/LOC when signals are present.
+- **Index health** - listed / indexed / skipped / stale coverage in a dashboard popover next to reindex (not in the nav).
 - **`command-center` CLI** - search and inspect your history from the terminal, including `flow`: reconstruct how a project was built from its transcripts.
 
 ## Install
@@ -93,7 +94,7 @@ GET  /api/sessions/search/status       index health (listed / indexed / skipped 
 GET  /api/sessions/stats/daily         per-day counts + token totals
 GET  /api/sessions/stats/monthly       per-month token totals by source
 GET  /api/sessions/{id}                session meta (incl. nested subagents)
-GET  /api/sessions/{id}/conversation   paginated events (default: latest 200; ?limit=&offset=)
+GET  /api/sessions/{id}/conversation   paginated events (?limit= up to 1000, ?offset=; omit offset for tail)
 POST /api/sessions/search/reindex      rebuild the index
 POST /api/sessions/tokens/backfill     backfill token usage for indexed sessions
 GET  /api/retention                    retention report (?prefer= preferences)
