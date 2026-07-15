@@ -169,7 +169,7 @@ function sourceBadge(source, label) {
     return `<span class="inline-block shrink-0 text-[11px] font-mono font-medium px-1.5 py-0.5 rounded border ${colors}" title="${esc(label || source)}">${esc(source)}</span>`;
 }
 
-/** Short model chip for list rows (full id in title). Optional effort suffix (Codex). */
+/** Short model chip for list rows (full id in title). Optional effort suffix (Codex/Grok). */
 function modelBadge(model, effort) {
     if (!model) return '';
     const short = shortModelName(model);
@@ -180,6 +180,17 @@ function modelBadge(model, effort) {
     const label = short + eff;
     const tip = effort ? `${model} (${effort})` : model;
     return `<span class="hidden sm:inline-block shrink-0 max-w-[9rem] truncate text-[10px] font-mono px-1.5 py-0.5 rounded border border-zinc-200 dark:border-cc-line3 text-zinc-500 dark:text-cc-dim" title="${esc(tip)}">${esc(label)}</span>`;
+}
+
+/**
+ * Agent persona/role chip (Grok summary.agent_name). Skip the default
+ * "general-purpose" label so every row is not noise.
+ */
+function agentNameBadge(name) {
+    const n = String(name || '').trim();
+    if (!n) return '';
+    if (n.toLowerCase() === 'general-purpose') return '';
+    return `<span class="hidden sm:inline-block shrink-0 max-w-[8rem] truncate text-[10px] font-mono px-1.5 py-0.5 rounded border border-zinc-200 dark:border-cc-line3 text-zinc-500 dark:text-cc-dim" title="Agent: ${esc(n)}">${esc(n)}</span>`;
 }
 
 function shortModelName(model) {
@@ -1079,6 +1090,7 @@ function renderDashboard() {
             <span class="flex-1 min-w-0 truncate text-sm text-zinc-800 dark:text-cc-ink" title="${esc(title)}">${esc(title)}</span>
             ${liveBadge(s)}
             ${modelBadge(s.model, s.reasoning_effort)}
+            ${agentNameBadge(s.agent_name)}
             ${countBadge}
             ${retentionBadge(s, showRetentionBadges())}
             <span class="hidden md:block max-w-[240px] truncate text-xs font-mono text-zinc-400 dark:text-cc-dim" title="${esc(shortPath(s.project) || '')}">${esc(projectLabel(s.project) || s.projectName || '')}</span>
@@ -1885,6 +1897,9 @@ function renderSessionView(sessionId) {
                 if (s.model) {
                     const m = shortModelName(s.model) || s.model;
                     parts.push(s.reasoning_effort ? `${m} · ${s.reasoning_effort}` : m);
+                }
+                if (s.agent_name && String(s.agent_name).toLowerCase() !== 'general-purpose') {
+                    parts.push(s.agent_name);
                 }
                 if (s.originator) parts.push(s.originator);
                 else if (s.codex_source) parts.push(s.codex_source);

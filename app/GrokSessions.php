@@ -6,7 +6,8 @@
  * Layout (see ~/.grok/docs/user-guide/17-sessions.md):
  *
  *   ~/.grok/sessions/<url-encoded-cwd>/<session-id>/
- *     summary.json          - title, timestamps, model, message counts, session_kind
+ *     summary.json          - title, timestamps, model, message counts, session_kind,
+ *                             reasoning_effort, agent_name (persona/role)
  *     updates.jsonl         - ACP session/update stream (authoritative conversation)
  *     signals.json          - aggregated counters (tokens, tools, duration, lines)
  *     chat_history.jsonl    - raw model messages (not used for UI replay)
@@ -761,6 +762,19 @@ class GrokSessions {
 			'created'     => $createdMs,
 			'model'       => $summary['current_model_id'] ?? '',
 		];
+
+		// summary.reasoning_effort (e.g. high) - UI model chip already accepts it.
+		$effort = trim( (string) ( $summary['reasoning_effort'] ?? '' ) );
+		if ( $effort !== '' ) {
+			$record['reasoning_effort'] = $effort;
+		}
+
+		// summary.agent_name is the active persona/role definition (general-purpose,
+		// grok-build-plan, implementer, …). Distinct from subagent_type on children.
+		$agentName = trim( (string) ( $summary['agent_name'] ?? '' ) );
+		if ( $agentName !== '' ) {
+			$record['agent_name'] = $agentName;
+		}
 
 		// Live chip when ~/.grok/active_sessions.json lists this session with a live PID.
 		$live = self::activeSessionMeta( $id );
