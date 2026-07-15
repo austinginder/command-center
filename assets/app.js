@@ -1858,7 +1858,7 @@ function renderSessionView(sessionId) {
                 </button>
             </div>
             <div id="session-children" class="hidden bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm overflow-hidden"></div>
-            <div id="session-log" class="bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm px-4 sm:px-6 py-5 space-y-1 text-sm"></div>
+            <div id="session-log" class="bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm text-sm overflow-hidden flex flex-col max-h-[calc(100vh-9.5rem)]"></div>
         </div>
     `;
 
@@ -1976,177 +1976,331 @@ function renderSessionView(sessionId) {
         })
         .catch(() => {});
 
-    // Paginated conversation load (default: latest PAGE of events). Full SSE
-    // replay freezes the tab on large Grok/Claude sessions (thousands of tools).
-    const PAGE = 200;
+    // Virtual conversation scroller: keep events in memory, mount only the
+    // viewport (+ overscan). Scroll up to auto-load earlier pages so large
+    // Grok/Claude sessions stay scrollable without freezing the tab.
+    const PAGE = 250;
+    const OVERSCAN_PX = 600;
     const logShell = document.getElementById('session-log');
     logShell.innerHTML = `
-        <div id="session-log-pager" class="hidden -mx-4 sm:-mx-6 -mt-5 mb-4 px-4 sm:px-6 py-2.5 border-b border-zinc-100 dark:border-cc-line2 flex flex-wrap items-center gap-2 text-xs font-mono text-zinc-500 dark:text-cc-dim"></div>
-        <div id="session-log-status" class="py-6 text-center text-xs font-mono text-zinc-400 dark:text-cc-dim">loading conversation…</div>
-        <div id="session-log-body" class="space-y-1"></div>
+        <div id="session-log-pager" class="shrink-0 px-4 sm:px-6 py-2 border-b border-zinc-100 dark:border-cc-line2 flex flex-wrap items-center gap-2 text-xs font-mono text-zinc-500 dark:text-cc-dim bg-white/90 dark:bg-cc-card/90 backdrop-blur-sm">
+            <span id="session-log-pager-label">loading conversation…</span>
+        </div>
+        <div id="session-log-scroll" class="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-6 py-4">
+            <div id="session-log-spacer-top"></div>
+            <div id="session-log-body" class="space-y-1"></div>
+            <div id="session-log-spacer-bottom"></div>
+        </div>
     `;
-    const pager = document.getElementById('session-log-pager');
-    const status = document.getElementById('session-log-status');
-    const log = document.getElementById('session-log-body');
+    const pagerLabel = document.getElementById('session-log-pager-label');
+    const scrollEl = document.getElementById('session-log-scroll');
+    const spacerTop = document.getElementById('session-log-spacer-top');
+    const spacerBot = document.getElementById('session-log-spacer-bottom');
+    const body = document.getElementById('session-log-body');
 
     const convState = {
-        total: 0,
-        startOffset: 0, // first event index currently in the DOM
-        endOffset: 0,   // exclusive
+        total: 0,          // total events on server
+        startOffset: 0,    // first loaded event index
+        endOffset: 0,      // exclusive end of loaded event range
+        events: [],        // loaded events (contiguous)
+        rows: [],          // coalesced display rows for virtual list
+        heights: [],       // estimated/measured height per row
         loading: false,
-        gen: 0, // bump on navigate-away to drop stale responses
+        gen: 0,
+        paintStart: -1,
+        paintEnd: -1,
+        stickToBottom: true,
     };
     state.sessionConv = convState;
 
-    function pageLabel() {
-        if (!convState.total) return 'empty conversation';
-        const from = convState.startOffset + 1;
-        const to = convState.endOffset;
-        return `events ${from}-${to} of ${convState.total}`;
+    function estimateRowHeight(row) {
+        if (row.kind === 'tools') {
+            const n = row.tools.length;
+            // summary line + one row per tool (+ collapsed output line when present)
+            let h = 22 + n * 22;
+            for (const t of row.tools) {
+                if (t.result && t.result.preview) h += 18;
+            }
+            return h;
+        }
+        if (row.kind === 'user_message') {
+            const len = (row.ev.text || '').length;
+            return Math.min(220, 56 + Math.ceil(len / 90) * 18);
+        }
+        if (row.kind === 'text') {
+            const len = (row.ev.text || '').length;
+            return Math.min(280, 40 + Math.ceil(len / 100) * 16);
+        }
+        if (row.kind === 'complete') return 40;
+        if (row.kind === 'summary') return 36;
+        return 24;
     }
 
-    function renderPager() {
-        if (!pager) return;
-        const show = convState.total > (convState.endOffset - convState.startOffset) || convState.startOffset > 0;
-        if (!show) {
-            pager.classList.add('hidden');
-            pager.innerHTML = '';
+    function coalesceEvents(events) {
+        const rows = [];
+        let i = 0;
+        while (i < events.length) {
+            const ev = events[i];
+            if (!ev || !ev.type || ev.type === 'init') {
+                i++;
+                continue;
+            }
+            if (ev.type === 'tool_call' || ev.type === 'tool_result') {
+                const tools = [];
+                while (i < events.length) {
+                    const e = events[i];
+                    if (!e || (e.type !== 'tool_call' && e.type !== 'tool_result')) break;
+                    if (e.type === 'tool_call') {
+                        tools.push({ call: e, result: null });
+                    } else if (tools.length && e.preview) {
+                        tools[tools.length - 1].result = e;
+                    }
+                    i++;
+                }
+                if (tools.length) rows.push({ kind: 'tools', tools });
+                continue;
+            }
+            if (ev.type === 'user_message' || ev.type === 'text' || ev.type === 'complete') {
+                rows.push({ kind: ev.type, ev });
+                i++;
+                continue;
+            }
+            if (ev.type === 'summary' && ev.text) {
+                rows.push({ kind: 'summary', ev });
+            }
+            i++;
+        }
+        return rows;
+    }
+
+    function rebuildRows() {
+        const prevLen = convState.rows.length;
+        const prevHeights = convState.heights;
+        const rows = coalesceEvents(convState.events);
+        // Prepend path: keep measured heights for rows that already existed.
+        if (prevLen > 0 && rows.length > prevLen && prevHeights.length === prevLen) {
+            const added = rows.length - prevLen;
+            const newHeights = [];
+            for (let i = 0; i < added; i++) newHeights.push(estimateRowHeight(rows[i]));
+            convState.heights = newHeights.concat(prevHeights);
+        } else {
+            convState.heights = rows.map(estimateRowHeight);
+        }
+        convState.rows = rows;
+        convState.paintStart = -1;
+        convState.paintEnd = -1;
+    }
+
+    function totalHeight() {
+        let h = 0;
+        for (const x of convState.heights) h += x;
+        return h;
+    }
+
+    function updatePager() {
+        if (!pagerLabel) return;
+        if (!convState.total && !convState.events.length) {
+            pagerLabel.textContent = convState.loading ? 'loading conversation…' : 'empty conversation';
             return;
         }
-        pager.classList.remove('hidden');
-        const earlier = convState.startOffset > 0;
-        pager.innerHTML = `
-            <button type="button" id="session-load-earlier" class="px-2 py-1 rounded border border-zinc-200 dark:border-cc-line3 bg-white dark:bg-cc-card text-zinc-600 dark:text-cc-soft hover:border-zinc-400 dark:hover:border-[#2a3830] disabled:opacity-40 disabled:cursor-not-allowed transition-colors" ${earlier && !convState.loading ? '' : 'disabled'}>
-                ${convState.loading ? 'loading…' : '↑ load earlier'}
-            </button>
-            <span class="text-zinc-400 dark:text-cc-dim">${esc(pageLabel())}</span>
-            <span class="text-zinc-300 dark:text-cc-dim hidden sm:inline">large sessions open on the latest window</span>
-        `;
-        const btn = document.getElementById('session-load-earlier');
-        if (btn && earlier) {
-            btn.addEventListener('click', () => loadConversationPage({ earlier: true }));
+        const from = convState.startOffset + 1;
+        const to = convState.endOffset;
+        const loaded = convState.endOffset - convState.startOffset;
+        let msg = `events ${from}-${to} of ${convState.total}`;
+        if (convState.startOffset > 0) {
+            msg += convState.loading ? ' · loading earlier…' : ' · scroll up for earlier';
+        } else if (loaded >= convState.total && convState.total > 0) {
+            msg += ' · full session loaded';
+        }
+        pagerLabel.textContent = msg;
+    }
+
+    function materializeRow(row) {
+        const host = document.createElement('div');
+        host.className = 'vrow';
+        if (row.kind === 'user_message') {
+            appendUserMessage(host, row.ev.text || '');
+        } else if (row.kind === 'text') {
+            appendEntry(host, 'text', row.ev.text || '');
+        } else if (row.kind === 'tools') {
+            for (const t of row.tools) {
+                appendToolCall(host, t.call);
+                if (t.result) appendResult(host, t.result);
+            }
+            collapseToolGroup(host);
+        } else if (row.kind === 'complete') {
+            appendComplete(host, row.ev);
+        } else if (row.kind === 'summary') {
+            const div = document.createElement('div');
+            div.className = 'text-zinc-500 italic text-xs py-1 mb-3 border-b border-zinc-100 dark:border-cc-line';
+            div.innerHTML = '<strong>Summary:</strong> ' + esc(row.ev.text || '');
+            host.appendChild(div);
+        }
+        return host;
+    }
+
+    function paint(force) {
+        const rows = convState.rows;
+        if (!rows.length) {
+            spacerTop.style.height = '0px';
+            spacerBot.style.height = '0px';
+            body.innerHTML = '';
+            convState.paintStart = -1;
+            convState.paintEnd = -1;
+            return;
+        }
+
+        const scrollTop = scrollEl.scrollTop;
+        const viewH = scrollEl.clientHeight || 400;
+        const topEdge = Math.max(0, scrollTop - OVERSCAN_PX);
+        const botEdge = scrollTop + viewH + OVERSCAN_PX;
+
+        let acc = 0;
+        let start = 0;
+        while (start < rows.length && acc + convState.heights[start] < topEdge) {
+            acc += convState.heights[start];
+            start++;
+        }
+        const topPad = acc;
+        let end = start;
+        while (end < rows.length && acc < botEdge) {
+            acc += convState.heights[end];
+            end++;
+        }
+        // Always mount at least a few rows.
+        if (end === start) end = Math.min(rows.length, start + 1);
+
+        const botPad = Math.max(0, totalHeight() - acc);
+        spacerTop.style.height = topPad + 'px';
+        spacerBot.style.height = botPad + 'px';
+
+        if (!force && start === convState.paintStart && end === convState.paintEnd) {
+            return;
+        }
+        convState.paintStart = start;
+        convState.paintEnd = end;
+
+        const frag = document.createDocumentFragment();
+        for (let i = start; i < end; i++) {
+            const el = materializeRow(rows[i]);
+            el.dataset.vidx = String(i);
+            frag.appendChild(el);
+        }
+        body.innerHTML = '';
+        body.appendChild(frag);
+
+        // Refine heights from real layout (once per paint range).
+        requestAnimationFrame(() => {
+            if (state.sessionConv !== convState) return;
+            let changed = false;
+            for (const el of body.children) {
+                const i = Number(el.dataset.vidx);
+                if (!Number.isFinite(i) || i < 0 || i >= convState.heights.length) continue;
+                const h = el.offsetHeight;
+                if (h > 0 && Math.abs(h - convState.heights[i]) > 3) {
+                    convState.heights[i] = h;
+                    changed = true;
+                }
+            }
+            if (changed) {
+                // Update spacers only; avoid remount loop unless range drifted hard.
+                const st = scrollEl.scrollTop;
+                let a = 0;
+                for (let i = 0; i < convState.paintStart; i++) a += convState.heights[i];
+                let mid = 0;
+                for (let i = convState.paintStart; i < convState.paintEnd; i++) mid += convState.heights[i];
+                spacerTop.style.height = a + 'px';
+                spacerBot.style.height = Math.max(0, totalHeight() - a - mid) + 'px';
+                // Keep scroll stable if browser clamped.
+                if (Math.abs(scrollEl.scrollTop - st) > 1) scrollEl.scrollTop = st;
+            }
+        });
+    }
+
+    function onScroll() {
+        if (state.sessionConv !== convState) return;
+        const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
+        convState.stickToBottom = maxScroll <= 0 || scrollEl.scrollTop >= maxScroll - 40;
+        paint(false);
+        // Infinite load earlier when near the top.
+        if (scrollEl.scrollTop < 160 && convState.startOffset > 0 && !convState.loading) {
+            loadConversationPage({ earlier: true });
         }
     }
 
-    function applyEvents(events, { prepend } = {}) {
-        const frag = document.createDocumentFragment();
-        // Temporary host so append* helpers can use lastElementChild for tool groups.
-        const host = document.createElement('div');
-        host.className = 'space-y-1';
-        for (const ev of events) {
-            const type = ev && ev.type;
-            if (!type || type === 'init') continue;
-            if (type === 'user_message') appendUserMessage(host, ev.text || '');
-            else if (type === 'text') appendEntry(host, 'text', ev.text || '');
-            else if (type === 'tool_call') appendToolCall(host, ev);
-            else if (type === 'tool_result') {
-                if (ev.preview) appendResult(host, ev);
-            } else if (type === 'complete') appendComplete(host, ev);
-            else if (type === 'summary' && ev.text) {
-                const div = document.createElement('div');
-                div.className = 'text-zinc-500 italic text-xs py-1 mb-3 border-b border-zinc-100 dark:border-cc-line';
-                div.innerHTML = '<strong>Summary:</strong> ' + esc(ev.text);
-                host.appendChild(div);
-            }
-        }
-        collapseToolGroup(host);
-        while (host.firstChild) frag.appendChild(host.firstChild);
-        if (prepend) {
-            log.insertBefore(frag, log.firstChild);
-        } else {
-            log.appendChild(frag);
-        }
-    }
+    scrollEl.addEventListener('scroll', onScroll, { passive: true });
 
     async function loadConversationPage({ earlier } = {}) {
         if (convState.loading) return;
+        if (earlier && convState.startOffset <= 0) return;
         const gen = convState.gen;
         convState.loading = true;
-        renderPager();
+        updatePager();
 
         const params = new URLSearchParams();
-        params.set('limit', String(PAGE));
         if (source) params.set('source', source);
         if (earlier) {
             const nextOffset = Math.max(0, convState.startOffset - PAGE);
-            // Only fetch the slice not already loaded.
             const need = convState.startOffset - nextOffset;
             if (need <= 0) {
                 convState.loading = false;
-                renderPager();
+                updatePager();
                 return;
             }
             params.set('offset', String(nextOffset));
             params.set('limit', String(need));
+        } else {
+            params.set('limit', String(PAGE));
+            // omit offset -> server tail
         }
-        // else: omit offset -> server returns tail window
         const url = '/api/sessions/' + encodeURIComponent(sessionId) + '/conversation?' + params.toString();
-
-        if (status && !earlier) {
-            status.classList.remove('hidden');
-            status.textContent = 'loading conversation…';
-        }
 
         try {
             const r = await fetch(url);
             if (!r.ok) throw new Error('HTTP ' + r.status);
             const data = await r.json();
-            if (gen !== convState.gen) return; // navigated away
+            if (gen !== convState.gen) return;
 
             const events = Array.isArray(data.events) ? data.events : (Array.isArray(data) ? data : []);
             const pageOffset = data.offset != null ? data.offset : 0;
             const pageCount = data.count != null ? data.count : events.length;
             convState.total = data.total != null ? data.total : events.length;
 
-            if (status) {
-                status.classList.add('hidden');
-                status.textContent = '';
-            }
-
             if (earlier) {
-                // Preserve scroll position when prepending.
-                const prevHeight = log.scrollHeight;
-                applyEvents(events, { prepend: true });
-                const root = document.scrollingElement || document.documentElement;
-                root.scrollTop += (log.scrollHeight - prevHeight);
+                const prevTop = scrollEl.scrollTop;
+                const prevH = totalHeight();
+                convState.events = events.concat(convState.events);
                 convState.startOffset = pageOffset;
-                // endOffset unchanged
+                rebuildRows();
+                const addedH = totalHeight() - prevH;
+                paint(true);
+                scrollEl.scrollTop = prevTop + Math.max(0, addedH);
             } else {
-                log.innerHTML = '';
+                convState.events = events.slice();
                 convState.startOffset = pageOffset;
                 convState.endOffset = pageOffset + pageCount;
-                // Batch large pages so the first paint is quick.
-                const chunk = 50;
-                if (events.length <= chunk) {
-                    applyEvents(events);
-                } else {
-                    let i = 0;
-                    await new Promise(resolve => {
-                        function step() {
-                            if (gen !== convState.gen) { resolve(); return; }
-                            applyEvents(events.slice(i, i + chunk));
-                            i += chunk;
-                            if (i < events.length) requestAnimationFrame(step);
-                            else resolve();
-                        }
-                        requestAnimationFrame(step);
-                    });
-                }
+                rebuildRows();
+                paint(true);
+                // Land at the latest activity.
+                requestAnimationFrame(() => {
+                    if (state.sessionConv !== convState) return;
+                    scrollEl.scrollTop = scrollEl.scrollHeight;
+                    paint(true);
+                });
             }
 
-            if (!events.length && !earlier) {
-                log.innerHTML = `<div class="py-6 text-center text-xs font-mono text-zinc-400 dark:text-cc-dim">no conversation events</div>`;
+            if (!earlier && !events.length) {
+                body.innerHTML = `<div class="py-6 text-center text-xs font-mono text-zinc-400 dark:text-cc-dim">no conversation events</div>`;
             }
         } catch (err) {
             if (gen !== convState.gen) return;
-            if (status) {
-                status.classList.remove('hidden');
-                status.textContent = 'failed to load conversation';
+            if (!earlier) {
+                pagerLabel.textContent = 'failed to load conversation';
             }
         } finally {
             if (gen === convState.gen) {
                 convState.loading = false;
-                renderPager();
+                updatePager();
             }
         }
     }
