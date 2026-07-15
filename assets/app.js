@@ -1,7 +1,11 @@
 // ─── State ───────────────────────────────────────────────────
 const state = {
-    sessionEs: null,  // legacy EventSource (unused; kept for cleanup)
-    sessionPage: null // { gen } for in-flight conversation page loads
+    sessionEs: null,   // legacy EventSource (unused; kept for cleanup)
+    sessionPage: null, // { gen } for in-flight conversation page loads
+    activeRoute: null, // 'dashboard' | 'usage' | 'session' | null
+    // Parked dashboard DOM so back/SPA return skips remount + heatmap refetch.
+    dashboardPark: null,
+    dashboardScrollY: 0,
 };
 
 // ─── Router ──────────────────────────────────────────────────
@@ -12,15 +16,55 @@ const routes = [
     { pattern: /^\/sessions\/([A-Za-z0-9_-]+)$/, view: renderSessionView },
 ];
 
+function isDashboardPath(pathname) {
+    return pathname === '/' || pathname === '';
+}
+
+function parkDashboard(app) {
+    if (!app || !app.firstChild) return;
+    state.dashboardScrollY = window.scrollY;
+    const park = document.createElement('div');
+    // Detached container keeps nodes + listeners alive without being visible.
+    while (app.firstChild) park.appendChild(app.firstChild);
+    state.dashboardPark = park;
+}
+
+function unparkDashboard(app) {
+    const park = state.dashboardPark;
+    if (!park) return false;
+    while (app.firstChild) app.removeChild(app.firstChild);
+    while (park.firstChild) app.appendChild(park.firstChild);
+    state.dashboardPark = null;
+    requestAnimationFrame(() => {
+        window.scrollTo(0, state.dashboardScrollY || 0);
+    });
+    return true;
+}
+
 function navigate(path, push = true) {
     if (push) history.pushState(null, '', path);
     onViewLeave();
 
     const app = document.getElementById('app');
-    app.innerHTML = '';
-
     // Strip query string for route matching but keep it accessible.
     const [pathname] = path.split('?');
+    const nextDash = isDashboardPath(pathname);
+
+    // Leaving the dashboard for another view: park DOM instead of destroying it.
+    if (state.activeRoute === 'dashboard' && !nextDash) {
+        parkDashboard(app);
+    }
+
+    // Returning home with a parked dashboard: restore instantly (no refetch).
+    if (nextDash && state.dashboardPark) {
+        unparkDashboard(app);
+        state.activeRoute = 'dashboard';
+        return;
+    }
+
+    // Fresh mount (or no park available).
+    app.innerHTML = '';
+    state.activeRoute = null;
 
     for (const route of routes) {
         const m = pathname.match(route.pattern);
@@ -415,6 +459,13 @@ const PAGE_SIZE = 150;
 
 function renderDashboard() {
     const app = document.getElementById('app');
+    // If a parked dashboard exists (e.g. race), prefer restore over double-mount.
+    if (state.dashboardPark) {
+        unparkDashboard(app);
+        state.activeRoute = 'dashboard';
+        return;
+    }
+    state.activeRoute = 'dashboard';
     app.innerHTML = `
         <div class="space-y-4">
             <!-- Search -->
@@ -1503,6 +1554,7 @@ function renderDashboard() {
 // run ~20x larger and would flatten everything else on a shared axis.
 function renderUsageView() {
     const app = document.getElementById('app');
+    state.activeRoute = 'usage';
     app.innerHTML = `
         <div class="space-y-4">
             <div class="flex flex-wrap items-center gap-2">
@@ -1832,6 +1884,7 @@ function renderUsageView() {
 // ─── View: Session Viewer ────────────────────────────────────
 function renderSessionView(sessionId) {
     const app = document.getElementById('app');
+    state.activeRoute = 'session';
 
     // Source from URL (falls back to server-side auto-detection if omitted).
     const qs = new URLSearchParams(location.search);
