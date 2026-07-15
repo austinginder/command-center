@@ -1,7 +1,6 @@
 // ─── State ───────────────────────────────────────────────────
 const state = {
-    sessionEs: null,   // legacy EventSource handle (if any)
-    sessionConv: null, // active session viewer pagination state
+    sessionEs: null, // EventSource for the session viewer
 };
 
 // ─── Router ──────────────────────────────────────────────────
@@ -55,10 +54,6 @@ function onViewLeave() {
     if (state.sessionEs) {
         state.sessionEs.close();
         state.sessionEs = null;
-    }
-    if (state.sessionConv) {
-        state.sessionConv.gen = (state.sessionConv.gen || 0) + 1;
-        state.sessionConv = null;
     }
 }
 
@@ -1858,7 +1853,7 @@ function renderSessionView(sessionId) {
                 </button>
             </div>
             <div id="session-children" class="hidden bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm overflow-hidden"></div>
-            <div id="session-log" class="bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm text-sm"></div>
+            <div id="session-log" class="bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm px-4 sm:px-6 py-5 space-y-1 text-sm"></div>
         </div>
     `;
 
@@ -1976,230 +1971,34 @@ function renderSessionView(sessionId) {
         })
         .catch(() => {});
 
-    // Simple progressive conversation render.
-    // - Page scrolls normally (no nested box, no virtual spacers).
-    // - Load a window of events and mount them all.
-    // - "Load earlier/later" grows the window; small sessions load in one shot.
-    // - Tool output markdown stays lazy (appendResult) so big pages stay light.
-    const PAGE = 300;
-    const logShell = document.getElementById('session-log');
-    logShell.className = 'bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm text-sm';
-    logShell.innerHTML = `
-        <div id="session-log-pager" class="px-4 sm:px-6 py-2.5 border-b border-zinc-100 dark:border-cc-line2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs font-mono text-zinc-500 dark:text-cc-dim">
-            <span id="session-log-pager-label">loading conversation…</span>
-            <span class="flex items-center gap-1.5 ml-auto">
-                <button type="button" id="session-jump-start" class="px-2 py-0.5 rounded border border-zinc-200 dark:border-cc-line3 bg-white dark:bg-cc-card text-zinc-600 dark:text-cc-soft hover:border-zinc-400 dark:hover:border-[#2a3830] disabled:opacity-40 transition-colors">oldest</button>
-                <button type="button" id="session-jump-end" class="px-2 py-0.5 rounded border border-zinc-200 dark:border-cc-line3 bg-white dark:bg-cc-card text-zinc-600 dark:text-cc-soft hover:border-zinc-400 dark:hover:border-[#2a3830] disabled:opacity-40 transition-colors">latest</button>
-            </span>
-        </div>
-        <div id="session-log-earlier-wrap" class="hidden px-4 sm:px-6 pt-3">
-            <button type="button" id="session-load-earlier" class="w-full py-2 rounded-lg border border-dashed border-zinc-200 dark:border-cc-line3 text-xs font-mono text-zinc-500 dark:text-cc-dim hover:border-zinc-400 dark:hover:border-[#2a3830] hover:text-zinc-700 dark:hover:text-cc-soft transition-colors disabled:opacity-40">↑ load earlier</button>
-        </div>
-        <div id="session-log-body" class="px-4 sm:px-6 py-4 space-y-1"></div>
-        <div id="session-log-later-wrap" class="hidden px-4 sm:px-6 pb-4">
-            <button type="button" id="session-load-later" class="w-full py-2 rounded-lg border border-dashed border-zinc-200 dark:border-cc-line3 text-xs font-mono text-zinc-500 dark:text-cc-dim hover:border-zinc-400 dark:hover:border-[#2a3830] hover:text-zinc-700 dark:hover:text-cc-soft transition-colors disabled:opacity-40">↓ load later</button>
-        </div>
-    `;
+    // Stream the conversation (replays history top-to-bottom, then closes).
+    const log = document.getElementById('session-log');
+    const es = new EventSource('/stream?session=' + encodeURIComponent(sessionId) + sourceQs);
 
-    const pagerLabel = document.getElementById('session-log-pager-label');
-    const earlierWrap = document.getElementById('session-log-earlier-wrap');
-    const laterWrap = document.getElementById('session-log-later-wrap');
-    const earlierBtn = document.getElementById('session-load-earlier');
-    const laterBtn = document.getElementById('session-load-later');
-    const jumpStartBtn = document.getElementById('session-jump-start');
-    const jumpEndBtn = document.getElementById('session-jump-end');
-    const body = document.getElementById('session-log-body');
+    es.addEventListener('summary', e => {
+        const d = JSON.parse(e.data);
+        const div = document.createElement('div');
+        div.className = 'text-zinc-500 italic text-xs py-1 mb-3 border-b border-zinc-100 dark:border-cc-line';
+        div.innerHTML = '<strong>Summary:</strong> ' + esc(d.text);
+        log.prepend(div);
+    });
 
-    const convState = {
-        total: 0,
-        startOffset: 0,
-        endOffset: 0,
-        events: [],
-        loading: false,
-        gen: 0,
-    };
-    state.sessionConv = convState;
+    es.addEventListener('user_message', e => appendUserMessage(log, JSON.parse(e.data).text));
+    es.addEventListener('text', e => appendEntry(log, 'text', JSON.parse(e.data).text));
+    es.addEventListener('tool_call', e => appendToolCall(log, JSON.parse(e.data)));
+    es.addEventListener('tool_result', e => {
+        const d = JSON.parse(e.data);
+        if (d.preview) appendResult(log, d);
+    });
+    es.addEventListener('complete', e => appendComplete(log, JSON.parse(e.data)));
+    es.addEventListener('done', () => {
+        collapseToolGroup(log);
+        es.close();
+        state.sessionEs = null;
+    });
+    es.onerror = () => {};
 
-    function updatePager() {
-        const has = convState.total > 0 || convState.events.length > 0;
-        if (!has) {
-            pagerLabel.textContent = convState.loading ? 'loading conversation…' : 'empty conversation';
-        } else {
-            const from = convState.events.length ? convState.startOffset + 1 : 0;
-            const to = convState.endOffset;
-            let msg = `events ${from}-${to} of ${convState.total}`;
-            if (convState.loading) msg += ' · loading…';
-            else if (convState.startOffset <= 0 && convState.endOffset >= convState.total) msg += ' · full session';
-            pagerLabel.textContent = msg;
-        }
-
-        const canEarlier = !convState.loading && convState.startOffset > 0;
-        const canLater = !convState.loading && convState.endOffset < convState.total;
-        earlierWrap.classList.toggle('hidden', !(canEarlier || (convState.loading && convState.startOffset > 0)));
-        laterWrap.classList.toggle('hidden', !(canLater || (convState.loading && convState.endOffset < convState.total)));
-        earlierBtn.disabled = convState.loading || convState.startOffset <= 0;
-        laterBtn.disabled = convState.loading || convState.endOffset >= convState.total;
-        earlierBtn.textContent = convState.loading && convState.startOffset > 0 ? 'loading earlier…' : '↑ load earlier';
-        laterBtn.textContent = convState.loading && convState.endOffset < convState.total ? 'loading later…' : '↓ load later';
-        jumpStartBtn.disabled = convState.loading || convState.startOffset <= 0;
-        jumpEndBtn.disabled = convState.loading || (convState.total > 0 && convState.endOffset >= convState.total);
-    }
-
-    function renderEvents(events) {
-        body.innerHTML = '';
-        if (!events.length) {
-            if (!convState.loading) {
-                body.innerHTML = `<div class="py-6 text-center text-xs font-mono text-zinc-400 dark:text-cc-dim">no conversation events</div>`;
-            }
-            return;
-        }
-        const host = body;
-        for (const ev of events) {
-            const type = ev && ev.type;
-            if (!type || type === 'init') continue;
-            if (type === 'user_message') appendUserMessage(host, ev.text || '');
-            else if (type === 'text') appendEntry(host, 'text', ev.text || '');
-            else if (type === 'tool_call') appendToolCall(host, ev);
-            else if (type === 'tool_result') {
-                if (ev.preview) appendResult(host, ev);
-            } else if (type === 'complete') appendComplete(host, ev);
-            else if (type === 'summary' && ev.text) {
-                const div = document.createElement('div');
-                div.className = 'text-zinc-500 italic text-xs py-1 mb-3 border-b border-zinc-100 dark:border-cc-line';
-                div.innerHTML = '<strong>Summary:</strong> ' + esc(ev.text);
-                host.appendChild(div);
-            }
-        }
-        collapseToolGroup(host);
-    }
-
-    function scrollLogIntoView(where) {
-        // where: 'start' | 'end'
-        requestAnimationFrame(() => {
-            if (state.sessionConv !== convState) return;
-            if (where === 'start') {
-                const y = window.scrollY + logShell.getBoundingClientRect().top - 56;
-                window.scrollTo(0, Math.max(0, y));
-            } else if (where === 'end') {
-                const y = window.scrollY + logShell.getBoundingClientRect().bottom - window.innerHeight + 24;
-                window.scrollTo(0, Math.max(0, y));
-            }
-        });
-    }
-
-    /**
-     * @param {{ direction: 'earlier'|'later'|'replace', offset?: number, scrollTo?: 'start'|'end'|'keep' }} opts
-     */
-    async function loadConversation(opts) {
-        const direction = opts.direction || 'replace';
-        if (convState.loading) return;
-        if (direction === 'earlier' && convState.startOffset <= 0) return;
-        if (direction === 'later' && convState.total > 0 && convState.endOffset >= convState.total) return;
-
-        const gen = convState.gen;
-        convState.loading = true;
-        updatePager();
-
-        const params = new URLSearchParams();
-        if (source) params.set('source', source);
-
-        if (direction === 'earlier') {
-            const nextOffset = Math.max(0, convState.startOffset - PAGE);
-            const need = convState.startOffset - nextOffset;
-            params.set('offset', String(nextOffset));
-            params.set('limit', String(need));
-        } else if (direction === 'later') {
-            params.set('offset', String(convState.endOffset));
-            params.set('limit', String(PAGE));
-        } else if (opts.offset != null) {
-            params.set('offset', String(opts.offset));
-            // Small sessions: ask for a generous page; server clamps to total.
-            params.set('limit', String(Math.max(PAGE, 500)));
-        } else {
-            // Default open: latest window.
-            params.set('limit', String(PAGE));
-        }
-
-        const url = '/api/sessions/' + encodeURIComponent(sessionId) + '/conversation?' + params.toString();
-
-        try {
-            const r = await fetch(url);
-            if (!r.ok) throw new Error('HTTP ' + r.status);
-            const data = await r.json();
-            if (gen !== convState.gen) return;
-
-            let events = Array.isArray(data.events) ? data.events : (Array.isArray(data) ? data : []);
-            const pageOffset = data.offset != null ? data.offset : 0;
-            const pageCount = data.count != null ? data.count : events.length;
-            convState.total = data.total != null ? data.total : events.length;
-
-            // One-shot full load when the whole session fits in a couple pages.
-            if (direction === 'replace' && opts.offset == null && convState.total > 0 && convState.total <= PAGE * 2 && pageOffset > 0) {
-                // We got a tail of a still-small session - refetch from 0 so the
-                // whole transcript is present without virtual-window tricks.
-                const fullParams = new URLSearchParams();
-                if (source) fullParams.set('source', source);
-                fullParams.set('offset', '0');
-                fullParams.set('limit', String(convState.total));
-                const fr = await fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/conversation?' + fullParams.toString());
-                if (fr.ok) {
-                    const full = await fr.json();
-                    if (gen !== convState.gen) return;
-                    events = Array.isArray(full.events) ? full.events : events;
-                    convState.total = full.total != null ? full.total : convState.total;
-                    convState.events = events.slice();
-                    convState.startOffset = full.offset != null ? full.offset : 0;
-                    convState.endOffset = convState.startOffset + (full.count != null ? full.count : events.length);
-                    renderEvents(convState.events);
-                    scrollLogIntoView(opts.scrollTo || 'end');
-                    return;
-                }
-            }
-
-            if (direction === 'earlier') {
-                if (events.length) {
-                    const prevHeight = document.documentElement.scrollHeight;
-                    const prevY = window.scrollY;
-                    convState.events = events.concat(convState.events);
-                    convState.startOffset = pageOffset;
-                    renderEvents(convState.events);
-                    // Keep the same content under the viewport after prepend.
-                    const delta = document.documentElement.scrollHeight - prevHeight;
-                    window.scrollTo(0, prevY + Math.max(0, delta));
-                }
-            } else if (direction === 'later') {
-                if (events.length) {
-                    convState.events = convState.events.concat(events);
-                    convState.endOffset = pageOffset + pageCount;
-                    renderEvents(convState.events);
-                }
-            } else {
-                convState.events = events.slice();
-                convState.startOffset = pageOffset;
-                convState.endOffset = pageOffset + pageCount;
-                renderEvents(convState.events);
-                scrollLogIntoView(opts.scrollTo || 'end');
-            }
-        } catch (err) {
-            if (gen !== convState.gen) return;
-            if (direction === 'replace') {
-                pagerLabel.textContent = 'failed to load conversation';
-                body.innerHTML = `<div class="py-6 text-center text-xs font-mono text-red-500">failed to load conversation</div>`;
-            }
-        } finally {
-            if (gen === convState.gen) {
-                convState.loading = false;
-                updatePager();
-            }
-        }
-    }
-
-    earlierBtn.addEventListener('click', () => loadConversation({ direction: 'earlier' }));
-    laterBtn.addEventListener('click', () => loadConversation({ direction: 'later' }));
-    jumpStartBtn.addEventListener('click', () => loadConversation({ direction: 'replace', offset: 0, scrollTo: 'start' }));
-    jumpEndBtn.addEventListener('click', () => loadConversation({ direction: 'replace', scrollTo: 'end' }));
-
-    loadConversation({ direction: 'replace', scrollTo: 'end' });
+    state.sessionEs = es;
 }
 
 // ─── Conversation Rendering ──────────────────────────────────
