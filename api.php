@@ -156,7 +156,7 @@ if ( $method === 'GET' && preg_match( '#^/sessions/([A-Za-z0-9_-]+)/conversation
 	$total  = count( $events );
 
 	$limit = isset( $_GET['limit'] ) ? (int) $_GET['limit'] : 200;
-	$limit = max( 1, min( 500, $limit ) );
+	$limit = max( 1, min( 1000, $limit ) );
 
 	if ( isset( $_GET['offset'] ) && $_GET['offset'] !== '' ) {
 		$offset = max( 0, (int) $_GET['offset'] );

@@ -2035,7 +2035,7 @@ function renderSessionView(sessionId) {
 
     // Page-based conversation load. Each page is a normal DOM render (no
     // virtual list). Huge sessions stay usable; small ones are a single page.
-    const PAGE = 150;
+    const PAGE = 1000;
     const logShell = document.getElementById('session-log');
     const pagerTop = document.getElementById('session-log-pager');
     const pagerBot = document.getElementById('session-log-pager-bottom');
@@ -2123,12 +2123,9 @@ function renderSessionView(sessionId) {
         collapseToolGroup(log);
     }
 
-    function scrollLogToTop() {
-        requestAnimationFrame(() => {
-            if (state.sessionPage !== pageState) return;
-            const y = window.scrollY + logShell.getBoundingClientRect().top - 56;
-            window.scrollTo(0, Math.max(0, y));
-        });
+    function scrollPageToTop() {
+        // Always pin the document top so the session header is visible.
+        window.scrollTo(0, 0);
     }
 
     /**
@@ -2176,7 +2173,7 @@ function renderSessionView(sessionId) {
 
             renderEvents(events);
             renderPager();
-            scrollLogToTop();
+            scrollPageToTop();
         } catch (err) {
             if (gen !== pageState.gen) return;
             log.innerHTML = `<div class="py-6 text-center text-xs font-mono text-red-500">failed to load conversation</div>`;
