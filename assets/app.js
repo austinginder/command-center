@@ -1,6 +1,7 @@
 // ─── State ───────────────────────────────────────────────────
 const state = {
-    sessionEs: null, // EventSource for the session viewer
+    sessionEs: null,  // legacy EventSource (unused; kept for cleanup)
+    sessionPage: null // { gen } for in-flight conversation page loads
 };
 
 // ─── Router ──────────────────────────────────────────────────
@@ -54,6 +55,10 @@ function onViewLeave() {
     if (state.sessionEs) {
         state.sessionEs.close();
         state.sessionEs = null;
+    }
+    if (state.sessionPage) {
+        state.sessionPage.gen++;
+        state.sessionPage = null;
     }
 }
 
@@ -1853,7 +1858,11 @@ function renderSessionView(sessionId) {
                 </button>
             </div>
             <div id="session-children" class="hidden bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm overflow-hidden"></div>
-            <div id="session-log" class="bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm px-4 sm:px-6 py-5 space-y-1 text-sm"></div>
+            <div id="session-log" class="bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm text-sm overflow-hidden">
+                <div id="session-log-pager" class="hidden px-4 sm:px-6 py-2.5 border-b border-zinc-100 dark:border-cc-line2 flex flex-wrap items-center gap-2 text-xs font-mono text-zinc-500 dark:text-cc-dim"></div>
+                <div id="session-log-body" class="px-4 sm:px-6 py-5 space-y-1"></div>
+                <div id="session-log-pager-bottom" class="hidden px-4 sm:px-6 py-2.5 border-t border-zinc-100 dark:border-cc-line2 flex flex-wrap items-center gap-2 text-xs font-mono text-zinc-500 dark:text-cc-dim"></div>
+            </div>
         </div>
     `;
 
@@ -1971,34 +1980,167 @@ function renderSessionView(sessionId) {
         })
         .catch(() => {});
 
-    // Stream the conversation (replays history top-to-bottom, then closes).
-    const log = document.getElementById('session-log');
-    const es = new EventSource('/stream?session=' + encodeURIComponent(sessionId) + sourceQs);
+    // Page-based conversation load. Each page is a normal DOM render (no
+    // virtual list). Huge sessions stay usable; small ones are a single page.
+    const PAGE = 150;
+    const logShell = document.getElementById('session-log');
+    const pagerTop = document.getElementById('session-log-pager');
+    const pagerBot = document.getElementById('session-log-pager-bottom');
+    const log = document.getElementById('session-log-body');
 
-    es.addEventListener('summary', e => {
-        const d = JSON.parse(e.data);
-        const div = document.createElement('div');
-        div.className = 'text-zinc-500 italic text-xs py-1 mb-3 border-b border-zinc-100 dark:border-cc-line';
-        div.innerHTML = '<strong>Summary:</strong> ' + esc(d.text);
-        log.prepend(div);
-    });
+    const pageState = {
+        gen: 0,
+        total: 0,
+        page: 0,       // 0-based page index
+        pages: 1,
+        loading: false,
+    };
+    state.sessionPage = pageState;
 
-    es.addEventListener('user_message', e => appendUserMessage(log, JSON.parse(e.data).text));
-    es.addEventListener('text', e => appendEntry(log, 'text', JSON.parse(e.data).text));
-    es.addEventListener('tool_call', e => appendToolCall(log, JSON.parse(e.data)));
-    es.addEventListener('tool_result', e => {
-        const d = JSON.parse(e.data);
-        if (d.preview) appendResult(log, d);
-    });
-    es.addEventListener('complete', e => appendComplete(log, JSON.parse(e.data)));
-    es.addEventListener('done', () => {
+    function pageCount() {
+        return Math.max(1, Math.ceil((pageState.total || 0) / PAGE) || 1);
+    }
+
+    function renderPager() {
+        const multi = pageState.total > PAGE;
+        [pagerTop, pagerBot].forEach(el => {
+            if (!el) return;
+            if (!multi && !pageState.loading) {
+                el.classList.add('hidden');
+                el.innerHTML = '';
+                return;
+            }
+            el.classList.remove('hidden');
+            const pages = pageCount();
+            const page = pageState.page;
+            const from = pageState.total ? page * PAGE + 1 : 0;
+            const to = Math.min(pageState.total, (page + 1) * PAGE);
+            const label = pageState.loading
+                ? 'loading…'
+                : `events ${from}-${to} of ${pageState.total} · page ${page + 1}/${pages}`;
+
+            const btn = (id, text, disabled) =>
+                `<button type="button" data-page-btn="${id}" class="px-2 py-1 rounded border border-zinc-200 dark:border-cc-line3 bg-white dark:bg-cc-card text-zinc-600 dark:text-cc-soft hover:border-zinc-400 dark:hover:border-[#2a3830] disabled:opacity-40 disabled:cursor-not-allowed transition-colors" ${disabled || pageState.loading ? 'disabled' : ''}>${text}</button>`;
+
+            el.innerHTML = `
+                <div class="flex flex-wrap items-center gap-1.5">
+                    ${btn('first', '« first', page <= 0)}
+                    ${btn('prev', '← older', page <= 0)}
+                </div>
+                <span class="flex-1 text-center text-zinc-400 dark:text-cc-dim">${esc(label)}</span>
+                <div class="flex flex-wrap items-center gap-1.5">
+                    ${btn('next', 'newer →', page >= pages - 1)}
+                    ${btn('last', 'last »', page >= pages - 1)}
+                </div>
+            `;
+            el.querySelectorAll('[data-page-btn]').forEach(b => {
+                b.addEventListener('click', () => {
+                    const id = b.getAttribute('data-page-btn');
+                    if (id === 'first') loadPage(0);
+                    else if (id === 'prev') loadPage(page - 1);
+                    else if (id === 'next') loadPage(page + 1);
+                    else if (id === 'last') loadPage(pageCount() - 1);
+                });
+            });
+        });
+    }
+
+    function renderEvents(events) {
+        log.innerHTML = '';
+        if (!events.length) {
+            log.innerHTML = `<div class="py-6 text-center text-xs font-mono text-zinc-400 dark:text-cc-dim">no conversation events</div>`;
+            return;
+        }
+        for (const ev of events) {
+            const type = ev && ev.type;
+            if (!type || type === 'init') continue;
+            if (type === 'user_message') appendUserMessage(log, ev.text || '');
+            else if (type === 'text') appendEntry(log, 'text', ev.text || '');
+            else if (type === 'tool_call') appendToolCall(log, ev);
+            else if (type === 'tool_result') {
+                if (ev.preview) appendResult(log, ev);
+            } else if (type === 'complete') appendComplete(log, ev);
+            else if (type === 'summary' && ev.text) {
+                const div = document.createElement('div');
+                div.className = 'text-zinc-500 italic text-xs py-1 mb-3 border-b border-zinc-100 dark:border-cc-line';
+                div.innerHTML = '<strong>Summary:</strong> ' + esc(ev.text);
+                log.appendChild(div);
+            }
+        }
         collapseToolGroup(log);
-        es.close();
-        state.sessionEs = null;
-    });
-    es.onerror = () => {};
+    }
 
-    state.sessionEs = es;
+    function scrollLogToTop() {
+        requestAnimationFrame(() => {
+            if (state.sessionPage !== pageState) return;
+            const y = window.scrollY + logShell.getBoundingClientRect().top - 56;
+            window.scrollTo(0, Math.max(0, y));
+        });
+    }
+
+    /**
+     * @param {number|'last'} pageIndex 0-based page, or 'last' for the final page
+     */
+    async function loadPage(pageIndex) {
+        if (pageState.loading) return;
+
+        const gen = ++pageState.gen;
+        pageState.loading = true;
+        renderPager();
+        log.innerHTML = `<div class="py-6 text-center text-xs font-mono text-zinc-400 dark:text-cc-dim">loading conversation…</div>`;
+
+        const params = new URLSearchParams();
+        params.set('limit', String(PAGE));
+        if (source) params.set('source', source);
+
+        // Known total: always use aligned offsets. First open uses 'last' (no offset
+        // -> server returns the tail, then we pin page index to the last page).
+        if (pageIndex === 'last' && pageState.total <= 0) {
+            // omit offset -> tail
+        } else {
+            const pages = pageState.total > 0 ? pageCount() : 1;
+            let page = pageIndex === 'last' ? pages - 1 : Math.max(0, pageIndex | 0);
+            if (pageState.total > 0) page = Math.min(page, pages - 1);
+            params.set('offset', String(page * PAGE));
+            pageState.page = page;
+        }
+
+        try {
+            const r = await fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/conversation?' + params.toString());
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const data = await r.json();
+            if (gen !== pageState.gen) return;
+
+            const events = Array.isArray(data.events) ? data.events : [];
+            pageState.total = data.total != null ? data.total : events.length;
+            pageState.pages = pageCount();
+
+            if (pageIndex === 'last' || (data.offset != null && data.offset >= Math.max(0, pageState.total - PAGE))) {
+                pageState.page = pageCount() - 1;
+            } else if (data.offset != null && PAGE > 0) {
+                pageState.page = Math.floor(data.offset / PAGE);
+            }
+
+            renderEvents(events);
+            renderPager();
+            scrollLogToTop();
+        } catch (err) {
+            if (gen !== pageState.gen) return;
+            log.innerHTML = `<div class="py-6 text-center text-xs font-mono text-red-500">failed to load conversation</div>`;
+            if (pagerTop) {
+                pagerTop.classList.remove('hidden');
+                pagerTop.innerHTML = '<span class="text-red-500">failed to load conversation</span>';
+            }
+        } finally {
+            if (gen === pageState.gen) {
+                pageState.loading = false;
+                renderPager();
+            }
+        }
+    }
+
+    // Latest page first; walk older with the pager.
+    loadPage('last');
 }
 
 // ─── Conversation Rendering ──────────────────────────────────
