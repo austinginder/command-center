@@ -2028,8 +2028,10 @@ function renderSessionView(sessionId) {
         loading: false,
         loadDir: null, // 'earlier' | 'later' | 'replace'
         gen: 0,
+        paintGen: 0,   // bumps every paint; stale measure rAFs must no-op
         paintStart: -1,
         paintEnd: -1,
+        pin: null,     // 'start' | 'end' | null - forces virtual window while settling
         _onScroll: null,
         _onResize: null,
         _io: null,
@@ -2175,6 +2177,22 @@ function renderSessionView(sessionId) {
         return window.scrollY - listOriginY();
     }
 
+    /** Site nav is sticky h-14; pin conversation card just under it. */
+    function navOffset() {
+        return 56;
+    }
+
+    function scrollToStart() {
+        // Put the conversation card (pager) under the site nav, content from row 0.
+        const y = window.scrollY + logShell.getBoundingClientRect().top - navOffset();
+        window.scrollTo(0, Math.max(0, y));
+    }
+
+    function scrollToEnd() {
+        const origin = listOriginY();
+        window.scrollTo(0, Math.max(0, origin + totalHeight() - window.innerHeight + 24));
+    }
+
     function paint(force) {
         const rows = convState.rows;
         if (!rows.length) {
@@ -2188,36 +2206,66 @@ function renderSessionView(sessionId) {
             return;
         }
 
-        const origin = listOriginY();
-        const viewTop = window.scrollY;
-        const viewBot = viewTop + window.innerHeight;
-        const topEdge = Math.max(0, viewTop - origin - OVERSCAN_PX);
-        const botEdge = Math.max(0, viewBot - origin + OVERSCAN_PX);
         const contentH = totalHeight();
-
-        let acc = 0;
+        const viewH = window.innerHeight || 800;
         let start = 0;
-        while (start < rows.length && acc + convState.heights[start] < topEdge) {
-            acc += convState.heights[start];
-            start++;
-        }
-        const topPad = acc;
-        let end = start;
-        while (end < rows.length && acc < botEdge) {
-            acc += convState.heights[end];
-            end++;
-        }
-        if (end === start) end = Math.min(rows.length, start + 1);
+        let end = 0;
+        let topPad = 0;
+        let acc = 0;
 
-        const botPad = Math.max(0, contentH - acc);
+        if (convState.pin === 'start') {
+            // Force the first rows - ignore stale window scroll from a prior view.
+            start = 0;
+            topPad = 0;
+            acc = 0;
+            while (end < rows.length && acc < viewH + OVERSCAN_PX) {
+                acc += convState.heights[end];
+                end++;
+            }
+            if (end === 0) end = Math.min(rows.length, 1);
+        } else if (convState.pin === 'end') {
+            end = rows.length;
+            acc = 0;
+            start = end;
+            while (start > 0 && acc < viewH + OVERSCAN_PX) {
+                start--;
+                acc += convState.heights[start];
+            }
+            topPad = 0;
+            for (let i = 0; i < start; i++) topPad += convState.heights[i];
+            acc = topPad;
+            for (let i = start; i < end; i++) acc += convState.heights[i];
+        } else {
+            const origin = listOriginY();
+            const viewTop = window.scrollY;
+            const viewBot = viewTop + viewH;
+            const topEdge = Math.max(0, viewTop - origin - OVERSCAN_PX);
+            const botEdge = Math.max(0, viewBot - origin + OVERSCAN_PX);
+
+            while (start < rows.length && acc + convState.heights[start] < topEdge) {
+                acc += convState.heights[start];
+                start++;
+            }
+            topPad = acc;
+            end = start;
+            while (end < rows.length && acc < botEdge) {
+                acc += convState.heights[end];
+                end++;
+            }
+            if (end === start) end = Math.min(rows.length, start + 1);
+        }
+
+        let mountedH = 0;
+        for (let i = start; i < end; i++) mountedH += convState.heights[i];
         spacerTop.style.height = topPad + 'px';
-        spacerBot.style.height = botPad + 'px';
+        spacerBot.style.height = Math.max(0, contentH - topPad - mountedH) + 'px';
 
         if (!force && start === convState.paintStart && end === convState.paintEnd) {
             return;
         }
         convState.paintStart = start;
         convState.paintEnd = end;
+        const thisPaint = ++convState.paintGen;
 
         const frag = document.createDocumentFragment();
         for (let i = start; i < end; i++) {
@@ -2230,6 +2278,8 @@ function renderSessionView(sessionId) {
 
         requestAnimationFrame(() => {
             if (state.sessionConv !== convState) return;
+            // Stale paint's measure pass - this was the mid-page blank-gap bug.
+            if (thisPaint !== convState.paintGen) return;
             let changed = false;
             for (const el of body.children) {
                 const i = Number(el.dataset.vidx);
@@ -2240,30 +2290,34 @@ function renderSessionView(sessionId) {
                     changed = true;
                 }
             }
-            if (changed) {
-                const st = window.scrollY;
-                let a = 0;
-                for (let i = 0; i < convState.paintStart; i++) a += convState.heights[i];
-                let mid = 0;
-                for (let i = convState.paintStart; i < convState.paintEnd; i++) mid += convState.heights[i];
-                spacerTop.style.height = a + 'px';
-                spacerBot.style.height = Math.max(0, totalHeight() - a - mid) + 'px';
-                if (Math.abs(window.scrollY - st) > 1) window.scrollTo(0, st);
+            if (!changed) return;
+            if (thisPaint !== convState.paintGen) return;
+            const st = window.scrollY;
+            let a = 0;
+            for (let i = 0; i < convState.paintStart; i++) a += convState.heights[i];
+            let mid = 0;
+            for (let i = convState.paintStart; i < convState.paintEnd; i++) mid += convState.heights[i];
+            spacerTop.style.height = a + 'px';
+            spacerBot.style.height = Math.max(0, totalHeight() - a - mid) + 'px';
+            if (convState.pin === 'start') {
+                scrollToStart();
+            } else if (convState.pin === 'end') {
+                scrollToEnd();
+            } else if (Math.abs(window.scrollY - st) > 1) {
+                window.scrollTo(0, st);
             }
         });
     }
 
     function maybeLoadMore() {
-        if (convState.loading || !convState.events.length) return;
+        if (convState.loading || !convState.events.length || convState.pin) return;
         const localTop = localScrollTop();
         const contentH = totalHeight();
         const viewH = window.innerHeight;
-        // Near top of loaded range -> fetch earlier.
         if (convState.startOffset > 0 && localTop < EDGE_PX) {
             loadConversation({ direction: 'earlier' });
             return;
         }
-        // Near bottom of loaded range -> fetch later.
         if (convState.endOffset < convState.total && localTop + viewH > contentH - EDGE_PX) {
             loadConversation({ direction: 'later' });
         }
@@ -2283,7 +2337,7 @@ function renderSessionView(sessionId) {
     // IntersectionObserver is more reliable than scroll thresholds alone.
     if (typeof IntersectionObserver === 'function') {
         convState._io = new IntersectionObserver((entries) => {
-            if (state.sessionConv !== convState || convState.loading) return;
+            if (state.sessionConv !== convState || convState.loading || convState.pin) return;
             for (const ent of entries) {
                 if (!ent.isIntersecting) continue;
                 if (ent.target === topSentinel && convState.startOffset > 0) {
@@ -2358,7 +2412,6 @@ function renderSessionView(sessionId) {
 
             if (direction === 'earlier') {
                 if (!events.length) {
-                    // Nothing more - clamp start so we do not loop forever.
                     convState.startOffset = Math.min(convState.startOffset, pageOffset);
                 } else {
                     const prevY = window.scrollY;
@@ -2367,11 +2420,14 @@ function renderSessionView(sessionId) {
                     convState.events = events.concat(convState.events);
                     convState.startOffset = pageOffset;
                     rebuildRows();
+                    // Invalidate any in-flight measure from prior paint.
+                    convState.paintGen++;
                     paint(true);
-                    // Prefer anchor via local offset so header/sticky shifts do not desync.
-                    const newOrigin = listOriginY();
                     const addedH = totalHeight() - prevH;
-                    const targetY = (Number.isFinite(anchorLocal) ? newOrigin + anchorLocal + Math.max(0, addedH) : prevY + Math.max(0, addedH));
+                    const newOrigin = listOriginY();
+                    const targetY = Number.isFinite(anchorLocal)
+                        ? newOrigin + anchorLocal + Math.max(0, addedH)
+                        : prevY + Math.max(0, addedH);
                     window.scrollTo(0, Math.max(0, targetY));
                     paint(true);
                 }
@@ -2380,29 +2436,42 @@ function renderSessionView(sessionId) {
                     convState.events = convState.events.concat(events);
                     convState.endOffset = pageOffset + pageCount;
                     rebuildRows();
+                    convState.paintGen++;
                     paint(true);
                 } else {
                     convState.endOffset = Math.max(convState.endOffset, pageOffset);
                 }
             } else {
-                // replace window
+                // replace window - pin FIRST so paint never uses the old scroll offset.
+                const scrollTo = opts.scrollTo || 'end';
                 convState.events = events.slice();
                 convState.startOffset = pageOffset;
                 convState.endOffset = pageOffset + pageCount;
                 rebuildRows();
+                convState.paintGen++;
+                convState.pin = scrollTo === 'start' ? 'start' : (scrollTo === 'end' ? 'end' : null);
+
+                if (convState.pin === 'start') {
+                    // Jump page to top region before painting so layout is consistent.
+                    window.scrollTo(0, 0);
+                }
                 paint(true);
-                const scrollTo = opts.scrollTo || 'end';
+                if (convState.pin === 'start') scrollToStart();
+                else if (convState.pin === 'end') scrollToEnd();
+                paint(true);
+
+                // Second frame: heights measured, re-pin, then release pin for normal scroll.
                 requestAnimationFrame(() => {
                     if (state.sessionConv !== convState) return;
-                    if (scrollTo === 'start') {
-                        const origin = listOriginY();
-                        // Sit just under the sticky pager.
-                        window.scrollTo(0, Math.max(0, origin - 56));
-                    } else if (scrollTo === 'end') {
-                        const origin = listOriginY();
-                        window.scrollTo(0, Math.max(0, origin + totalHeight() - window.innerHeight + 48));
-                    }
+                    if (convState.pin === 'start') scrollToStart();
+                    else if (convState.pin === 'end') scrollToEnd();
                     paint(true);
+                    requestAnimationFrame(() => {
+                        if (state.sessionConv !== convState) return;
+                        convState.pin = null;
+                        paint(true);
+                        maybeLoadMore();
+                    });
                 });
             }
         } catch (err) {
@@ -2415,11 +2484,13 @@ function renderSessionView(sessionId) {
                 convState.loading = false;
                 convState.loadDir = null;
                 updatePager();
-                // If the user is still parked at an edge, keep filling the window.
-                requestAnimationFrame(() => {
-                    if (state.sessionConv !== convState) return;
-                    maybeLoadMore();
-                });
+                // Edge-fill only when not mid pin-settle (replace handles its own).
+                if (direction !== 'replace') {
+                    requestAnimationFrame(() => {
+                        if (state.sessionConv !== convState) return;
+                        maybeLoadMore();
+                    });
+                }
             }
         }
     }
