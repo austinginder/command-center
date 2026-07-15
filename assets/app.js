@@ -58,6 +58,12 @@ function onViewLeave() {
     }
     if (state.sessionConv) {
         state.sessionConv.gen = (state.sessionConv.gen || 0) + 1;
+        if (state.sessionConv._onScroll) {
+            window.removeEventListener('scroll', state.sessionConv._onScroll);
+        }
+        if (state.sessionConv._onResize) {
+            window.removeEventListener('resize', state.sessionConv._onResize);
+        }
         state.sessionConv = null;
     }
 }
@@ -1858,7 +1864,7 @@ function renderSessionView(sessionId) {
                 </button>
             </div>
             <div id="session-children" class="hidden bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm overflow-hidden"></div>
-            <div id="session-log" class="bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm text-sm overflow-hidden flex flex-col max-h-[calc(100vh-9.5rem)]"></div>
+            <div id="session-log" class="bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm text-sm"></div>
         </div>
     `;
 
@@ -1976,24 +1982,23 @@ function renderSessionView(sessionId) {
         })
         .catch(() => {});
 
-    // Virtual conversation scroller: keep events in memory, mount only the
-    // viewport (+ overscan). Scroll up to auto-load earlier pages so large
-    // Grok/Claude sessions stay scrollable without freezing the tab.
+    // Window-scroll virtual list: page scrolls normally; only viewport rows
+    // are mounted. Scroll toward the top to auto-load earlier pages.
     const PAGE = 250;
-    const OVERSCAN_PX = 600;
+    const OVERSCAN_PX = 800;
     const logShell = document.getElementById('session-log');
     logShell.innerHTML = `
-        <div id="session-log-pager" class="shrink-0 px-4 sm:px-6 py-2 border-b border-zinc-100 dark:border-cc-line2 flex flex-wrap items-center gap-2 text-xs font-mono text-zinc-500 dark:text-cc-dim bg-white/90 dark:bg-cc-card/90 backdrop-blur-sm">
+        <div id="session-log-pager" class="sticky top-0 z-10 px-4 sm:px-6 py-2 border-b border-zinc-100 dark:border-cc-line2 flex flex-wrap items-center gap-2 text-xs font-mono text-zinc-500 dark:text-cc-dim bg-white/95 dark:bg-cc-card/95 backdrop-blur-sm rounded-t-xl">
             <span id="session-log-pager-label">loading conversation…</span>
         </div>
-        <div id="session-log-scroll" class="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-6 py-4">
+        <div id="session-log-list" class="px-4 sm:px-6 py-4">
             <div id="session-log-spacer-top"></div>
             <div id="session-log-body" class="space-y-1"></div>
             <div id="session-log-spacer-bottom"></div>
         </div>
     `;
     const pagerLabel = document.getElementById('session-log-pager-label');
-    const scrollEl = document.getElementById('session-log-scroll');
+    const listEl = document.getElementById('session-log-list');
     const spacerTop = document.getElementById('session-log-spacer-top');
     const spacerBot = document.getElementById('session-log-spacer-bottom');
     const body = document.getElementById('session-log-body');
@@ -2009,7 +2014,8 @@ function renderSessionView(sessionId) {
         gen: 0,
         paintStart: -1,
         paintEnd: -1,
-        stickToBottom: true,
+        _onScroll: null,
+        _onResize: null,
     };
     state.sessionConv = convState;
 
@@ -2139,6 +2145,12 @@ function renderSessionView(sessionId) {
         return host;
     }
 
+    /** Page Y of the top of the virtual list (document coordinates). */
+    function listOriginY() {
+        const rect = listEl.getBoundingClientRect();
+        return rect.top + window.scrollY;
+    }
+
     function paint(force) {
         const rows = convState.rows;
         if (!rows.length) {
@@ -2150,10 +2162,13 @@ function renderSessionView(sessionId) {
             return;
         }
 
-        const scrollTop = scrollEl.scrollTop;
-        const viewH = scrollEl.clientHeight || 400;
-        const topEdge = Math.max(0, scrollTop - OVERSCAN_PX);
-        const botEdge = scrollTop + viewH + OVERSCAN_PX;
+        // Map the window viewport into list-local coordinates.
+        const origin = listOriginY();
+        const viewTop = window.scrollY;
+        const viewBot = viewTop + window.innerHeight;
+        const topEdge = Math.max(0, viewTop - origin - OVERSCAN_PX);
+        const botEdge = Math.max(0, viewBot - origin + OVERSCAN_PX);
+        const contentH = totalHeight();
 
         let acc = 0;
         let start = 0;
@@ -2167,10 +2182,10 @@ function renderSessionView(sessionId) {
             acc += convState.heights[end];
             end++;
         }
-        // Always mount at least a few rows.
+        // Always mount at least a few rows when the list is on-screen.
         if (end === start) end = Math.min(rows.length, start + 1);
 
-        const botPad = Math.max(0, totalHeight() - acc);
+        const botPad = Math.max(0, contentH - acc);
         spacerTop.style.height = topPad + 'px';
         spacerBot.style.height = botPad + 'px';
 
@@ -2203,32 +2218,36 @@ function renderSessionView(sessionId) {
                 }
             }
             if (changed) {
-                // Update spacers only; avoid remount loop unless range drifted hard.
-                const st = scrollEl.scrollTop;
+                const st = window.scrollY;
                 let a = 0;
                 for (let i = 0; i < convState.paintStart; i++) a += convState.heights[i];
                 let mid = 0;
                 for (let i = convState.paintStart; i < convState.paintEnd; i++) mid += convState.heights[i];
                 spacerTop.style.height = a + 'px';
                 spacerBot.style.height = Math.max(0, totalHeight() - a - mid) + 'px';
-                // Keep scroll stable if browser clamped.
-                if (Math.abs(scrollEl.scrollTop - st) > 1) scrollEl.scrollTop = st;
+                // Keep page scroll stable if layout shifted.
+                if (Math.abs(window.scrollY - st) > 1) window.scrollTo(0, st);
             }
         });
     }
 
     function onScroll() {
         if (state.sessionConv !== convState) return;
-        const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
-        convState.stickToBottom = maxScroll <= 0 || scrollEl.scrollTop >= maxScroll - 40;
         paint(false);
-        // Infinite load earlier when near the top.
-        if (scrollEl.scrollTop < 160 && convState.startOffset > 0 && !convState.loading) {
-            loadConversationPage({ earlier: true });
+        // Infinite load earlier when the top of the loaded range nears the viewport.
+        if (convState.startOffset > 0 && !convState.loading) {
+            const origin = listOriginY();
+            const localTop = window.scrollY - origin;
+            if (localTop < 240) {
+                loadConversationPage({ earlier: true });
+            }
         }
     }
 
-    scrollEl.addEventListener('scroll', onScroll, { passive: true });
+    convState._onScroll = onScroll;
+    convState._onResize = () => paint(true);
+    window.addEventListener('scroll', convState._onScroll, { passive: true });
+    window.addEventListener('resize', convState._onResize, { passive: true });
 
     async function loadConversationPage({ earlier } = {}) {
         if (convState.loading) return;
@@ -2267,24 +2286,28 @@ function renderSessionView(sessionId) {
             convState.total = data.total != null ? data.total : events.length;
 
             if (earlier) {
-                const prevTop = scrollEl.scrollTop;
+                const prevY = window.scrollY;
                 const prevH = totalHeight();
                 convState.events = events.concat(convState.events);
                 convState.startOffset = pageOffset;
                 rebuildRows();
                 const addedH = totalHeight() - prevH;
                 paint(true);
-                scrollEl.scrollTop = prevTop + Math.max(0, addedH);
+                // Keep the same content under the viewport while prepending.
+                window.scrollTo(0, prevY + Math.max(0, addedH));
+                paint(true);
             } else {
                 convState.events = events.slice();
                 convState.startOffset = pageOffset;
                 convState.endOffset = pageOffset + pageCount;
                 rebuildRows();
                 paint(true);
-                // Land at the latest activity.
+                // Land at the latest activity (page scroll).
                 requestAnimationFrame(() => {
                     if (state.sessionConv !== convState) return;
-                    scrollEl.scrollTop = scrollEl.scrollHeight;
+                    const origin = listOriginY();
+                    const target = origin + totalHeight() - window.innerHeight + 48;
+                    window.scrollTo(0, Math.max(0, target));
                     paint(true);
                 });
             }
