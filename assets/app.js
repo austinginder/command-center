@@ -6,6 +6,7 @@ const state = {
     // Parked dashboard DOM so back/SPA return skips remount + heatmap refetch.
     dashboardPark: null,
     dashboardScrollY: 0,
+    indexStatus: null, // last /api/sessions/search/status payload
 };
 
 // ─── Router ──────────────────────────────────────────────────
@@ -433,25 +434,44 @@ function emptyState(illo, title, sub) {
     </div>`;
 }
 
-// ─── Index Status (nav) ──────────────────────────────────────
+// ─── Index Status (tucked beside reindex on the dashboard) ───
 async function loadIndexStatus() {
     try {
         const res = await fetch('/api/sessions/search/status');
-        const d = await res.json();
-        const el = document.getElementById('index-status');
-        if (!el) return;
-        const parts = [];
-        if (d.listed != null) parts.push(d.listed + ' listed');
-        if (d.indexed != null) parts.push(d.indexed + ' indexed');
-        if (d.skipped > 0) parts.push(d.skipped + ' skipped');
-        if (d.stale > 0) parts.push(d.stale + ' stale');
-        if (d.db_size_bytes) parts.push(formatBytes(d.db_size_bytes));
-        el.textContent = parts.join(' · ');
-        const tips = [];
-        if (d.skipped > 0) tips.push(d.skipped + ' listed session(s) have no fingerprint (missing file) and cannot be indexed');
-        if (d.stale > 0) tips.push(d.stale + ' changed since last index - reindex or wait for auto-refresh');
-        el.title = tips.join('. ') || 'Search index health';
+        state.indexStatus = await res.json();
+        renderIndexStatus();
     } catch (err) {}
+}
+
+function renderIndexStatus() {
+    const d = state.indexStatus;
+    const body = document.getElementById('index-status-body');
+    const btn = document.getElementById('index-status-btn');
+    if (!d || !body) return;
+
+    const rows = [];
+    if (d.listed != null) rows.push(['Listed', String(d.listed)]);
+    if (d.indexed != null) rows.push(['Indexed', String(d.indexed)]);
+    if (d.skipped != null) rows.push(['Skipped', String(d.skipped)]);
+    if (d.stale != null) rows.push(['Stale', String(d.stale)]);
+    if (d.db_size_bytes) rows.push(['Index size', formatBytes(d.db_size_bytes)]);
+
+    body.innerHTML = rows.map(([k, v]) =>
+        `<div class="flex justify-between gap-4"><span class="text-zinc-400 dark:text-cc-dim">${esc(k)}</span><span class="text-zinc-700 dark:text-cc-soft">${esc(v)}</span></div>`
+    ).join('');
+
+    const tips = [];
+    if (d.skipped > 0) tips.push(d.skipped + ' listed session(s) have no fingerprint (missing file) and cannot be indexed');
+    if (d.stale > 0) tips.push(d.stale + ' changed since last index - reindex or wait for auto-refresh');
+    if (btn) {
+        btn.title = tips.join('. ') || 'Search index health';
+        // Soft flag when attention is needed; otherwise stay quiet.
+        const attention = (d.skipped > 0) || (d.stale > 0);
+        btn.classList.toggle('text-amber-500', attention);
+        btn.classList.toggle('border-amber-300', attention);
+        btn.classList.toggle('dark:border-amber-700', attention);
+        btn.classList.toggle('text-zinc-400', !attention);
+    }
 }
 
 // ─── View: Dashboard (session index) ─────────────────────────
@@ -492,6 +512,17 @@ function renderDashboard() {
                             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                         </button>
                         <div id="project-combo-list" class="hidden absolute right-0 z-30 mt-1 w-96 max-h-80 overflow-y-auto rounded-lg border border-zinc-200 dark:border-cc-line3 bg-white dark:bg-cc-card shadow-xl"></div>
+                    </div>
+                    <div class="relative" id="index-status-wrap">
+                        <button type="button" id="index-status-btn" title="Search index health"
+                            class="p-1.5 rounded-lg border border-zinc-200 dark:border-cc-line bg-white dark:bg-cc-card text-zinc-400 hover:text-zinc-600 dark:hover:text-cc-soft transition-colors"
+                            aria-expanded="false" aria-controls="index-status-panel">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2 1 3 3 3h10c2 0 3-1 3-3V7M4 7c0-2 1-3 3-3h10c2 0 3 1 3 3M4 7h16M9 3v4M15 3v4M9 12h6"/></svg>
+                        </button>
+                        <div id="index-status-panel" class="hidden absolute right-0 z-30 mt-1 w-56 rounded-lg border border-zinc-200 dark:border-cc-line3 bg-white dark:bg-cc-card shadow-xl p-3 space-y-1.5">
+                            <div class="text-[10px] font-mono font-semibold uppercase tracking-widest text-zinc-400 dark:text-cc-dim mb-1">Search index</div>
+                            <div id="index-status-body" class="text-[11px] font-mono space-y-1 text-zinc-500 dark:text-cc-dim">loading…</div>
+                        </div>
                     </div>
                     <button id="reindex-btn" title="Rebuild search index" class="p-1.5 rounded-lg border border-zinc-200 dark:border-cc-line bg-white dark:bg-cc-card text-zinc-400 hover:text-zinc-600 dark:hover:text-cc-soft transition-colors">
                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
@@ -1489,6 +1520,25 @@ function renderDashboard() {
     });
 
     document.getElementById('deep-search-btn').addEventListener('click', doDeepSearch);
+
+    // Index health popover (next to reindex).
+    const indexBtn = document.getElementById('index-status-btn');
+    const indexPanel = document.getElementById('index-status-panel');
+    if (indexBtn && indexPanel) {
+        indexBtn.addEventListener('click', e => {
+            e.stopPropagation();
+            const open = indexPanel.classList.toggle('hidden') === false;
+            indexBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            if (open) renderIndexStatus();
+        });
+        document.addEventListener('click', e => {
+            if (!indexPanel.classList.contains('hidden') && !e.target.closest('#index-status-wrap')) {
+                indexPanel.classList.add('hidden');
+                indexBtn.setAttribute('aria-expanded', 'false');
+            }
+        }, { capture: true });
+    }
+    renderIndexStatus();
 
     document.getElementById('reindex-btn').addEventListener('click', async () => {
         const btn = document.getElementById('reindex-btn');
