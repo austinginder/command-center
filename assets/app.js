@@ -2036,7 +2036,6 @@ function renderSessionView(sessionId) {
     // Page-based conversation load. Each page is a normal DOM render (no
     // virtual list). Huge sessions stay usable; small ones are a single page.
     const PAGE = 1000;
-    const logShell = document.getElementById('session-log');
     const pagerTop = document.getElementById('session-log-pager');
     const pagerBot = document.getElementById('session-log-pager-bottom');
     const log = document.getElementById('session-log-body');
