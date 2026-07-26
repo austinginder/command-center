@@ -767,6 +767,8 @@ function resolveAgent( ?string $input ): ?string {
 		'grok'          => 'grok',
 		'grok-code'     => 'grok',
 		'grokcode'      => 'grok',
+		'grok-build'    => 'grok',
+		'grokbuild'     => 'grok',
 	];
 
 	$key = strtolower( str_replace( [ ' ', '_' ], '-', $input ) );
@@ -876,7 +878,7 @@ Available agents:
   opencode, open-code     OpenCode
   kimi                    Kimi
   antigravity, agy        Antigravity
-  grok, grok-code         Grok Build
+  grok, grok-code, grok-build   Grok Build
 
 Examples:
   command-center "error handling"
