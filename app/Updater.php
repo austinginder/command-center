@@ -19,6 +19,8 @@
  * Local dev simulation (no real release needed):
  *   COMMAND_CENTER_UPDATE_SIMULATE=1.8.0   pretend remote latest is 1.8.0
  *   COMMAND_CENTER_UPDATE_SIMULATE=1       bump local patch (1.7.0 → 1.7.1)
+ *   data/update-simulate                 same values as a one-line file (for Web UI;
+ *                                        gitignored under data/)
  * Apply under simulation is a dry-run (nothing installed; useful for UI testing).
  */
 class Updater {
@@ -249,16 +251,29 @@ class Updater {
 	}
 
 	/**
-	 * Parse COMMAND_CENTER_UPDATE_SIMULATE.
+	 * Parse COMMAND_CENTER_UPDATE_SIMULATE env, or data/update-simulate file.
 	 *
 	 * @return string|null Fake remote version, or null when simulation is off.
 	 */
 	public static function simulateVersion( string $current ): ?string {
+		$raw = null;
 		$env = getenv( 'COMMAND_CENTER_UPDATE_SIMULATE' );
-		if ( $env === false || $env === '' ) {
+		if ( $env !== false && $env !== '' ) {
+			$raw = (string) $env;
+		} else {
+			$file = rtrim( DATA_DIR, '/' ) . '/update-simulate';
+			if ( is_readable( $file ) ) {
+				$raw = (string) file_get_contents( $file );
+			}
+		}
+		if ( $raw === null || $raw === '' ) {
 			return null;
 		}
-		$v = trim( (string) $env );
+		// First non-empty line only.
+		$v = trim( (string) strtok( $raw, "\r\n" ) );
+		if ( $v === '' ) {
+			return null;
+		}
 		$lower = strtolower( $v );
 		if ( in_array( $lower, [ '0', 'false', 'off', 'no' ], true ) ) {
 			return null;
