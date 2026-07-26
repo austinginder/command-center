@@ -2043,10 +2043,12 @@ function renderSessionView(sessionId) {
                 }
                 if (s.duration_ms != null && s.duration_ms > 0) parts.push(formatDurationMs(s.duration_ms));
                 if (s.turn_count) parts.push(s.turn_count + (s.turn_count === 1 ? ' turn' : ' turns'));
+                if (s.message_count) parts.push(s.message_count + (s.message_count === 1 ? ' msg' : ' msgs'));
                 if (s.tool_calls != null) parts.push(s.tool_calls + (s.tool_calls === 1 ? ' tool' : ' tools'));
                 const loc = locLabel(s);
                 if (loc) parts.push(loc);
                 if (s.files_touched) parts.push(s.files_touched + (s.files_touched === 1 ? ' file' : ' files'));
+                if (s.compaction_count) parts.push(s.compaction_count + (s.compaction_count === 1 ? ' compact' : ' compacts'));
                 if (s.context_window_pct != null && s.context_window_pct > 0) {
                     const used = s.context_tokens_used != null ? formatTokens(s.context_tokens_used) : '';
                     const total = s.context_window_tokens != null ? formatTokens(s.context_window_tokens) : '';

@@ -15,6 +15,7 @@ All notable changes to Command Center are documented here.
 - **Grok Build subagent usage fold** - parent token totals sum direct child session usage (Grok does not fold bills into the parent the way Claude logs per-message usage). Fingerprint includes child `updates.jsonl` so nested-only activity reindexes.
 - **Grok Build search text** - FTS also indexes background-task descriptions and `update_goal` progress lines.
 - **Tool labels** - `UpdateGoal`, plan mode, image tools, and ask-user questions get proper categories and describe strings.
+- **Grok Build detail meta** - message count, compaction count; FTS includes nested subagent descriptions.
 
 ## [1.7.0] - 2026-07-15
 

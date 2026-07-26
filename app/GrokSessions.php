@@ -340,6 +340,24 @@ class GrokSessions {
 			$parts[] = $session['display'];
 		}
 
+		// Child agent descriptions help find parents by nested work.
+		$dir = self::findSessionDir( $session['id'] ?? '' );
+		if ( $dir ) {
+			$subRoot = $dir . '/subagents';
+			if ( is_dir( $subRoot ) ) {
+				foreach ( glob( $subRoot . '/*', GLOB_ONLYDIR ) ?: [] as $childDir ) {
+					$meta = self::readJson( $childDir . '/meta.json' );
+					if ( ! is_array( $meta ) ) {
+						continue;
+					}
+					$desc = trim( (string) ( $meta['description'] ?? '' ) );
+					if ( $desc !== '' ) {
+						$parts[] = mb_substr( $desc, 0, 500 );
+					}
+				}
+			}
+		}
+
 		$file = self::findSessionFile( $session['id'] ?? '' );
 		if ( ! $file || ! str_ends_with( $file, 'updates.jsonl' ) ) {
 			return implode( "\n", $parts );
@@ -1013,6 +1031,12 @@ class GrokSessions {
 			'model'       => $summary['current_model_id'] ?? '',
 		];
 
+		// Chat-message count from summary (user+assistant turns), when present.
+		$chatMsgs = (int) ( $summary['num_chat_messages'] ?? 0 );
+		if ( $chatMsgs > 0 ) {
+			$record['message_count'] = $chatMsgs;
+		}
+
 		// summary.reasoning_effort (e.g. high) - UI model chip already accepts it.
 		$effort = trim( (string) ( $summary['reasoning_effort'] ?? '' ) );
 		if ( $effort !== '' ) {
@@ -1129,6 +1153,11 @@ class GrokSessions {
 			$record['context_window_pct'] = $ctxPct;
 		} elseif ( $ctxUsed > 0 && $ctxTotal > 0 ) {
 			$record['context_window_pct'] = (int) min( 100, round( ( $ctxUsed / $ctxTotal ) * 100 ) );
+		}
+
+		$compactions = (int) ( $signals['compactionCount'] ?? 0 );
+		if ( $compactions > 0 ) {
+			$record['compaction_count'] = $compactions;
 		}
 	}
 
