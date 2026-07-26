@@ -171,7 +171,8 @@ command-center version --json   # full manifest
 ### update
 
 Check for and install the latest release. Compares the local `manifest.json` against
-the latest on GitHub.
+the latest on GitHub (`main`). Same engine as the Web UI updater (`app/Updater.php`).
+Remote checks are cached under `data/update-check.json` for 24 hours.
 
 ```bash
 command-center update --check   # report only, install nothing
@@ -180,8 +181,9 @@ command-center update           # update in place
 
 Git installs are updated with `git pull --ff-only` - if the working tree has local
 changes, the update refuses and leaves everything alone. Non-git installs download
-the release archive and copy it over the install. `data/` (your search index) is
-never touched either way.
+the release package (`command-center.zip` from the GitHub release, or a tag archive)
+and copy it over the install. `data/` (your search index) is never touched either way.
+Set `COMMAND_CENTER_UPDATE_CHECK=0` to disable remote checks.
 
 ## Options
 

@@ -7,6 +7,8 @@ const state = {
     dashboardPark: null,
     dashboardScrollY: 0,
     indexStatus: null, // last /api/sessions/search/status payload
+    updateStatus: null, // last /api/update/check payload
+    updateCheckStarted: false, // daily check kicked off once per page load
 };
 
 // ─── Router ──────────────────────────────────────────────────
@@ -434,6 +436,190 @@ function emptyState(illo, title, sub) {
     </div>`;
 }
 
+// ─── Self-update (nav version chip; daily check on dashboard load) ───
+function ensureUpdatePanelWired() {
+    const btn = document.getElementById('version-btn');
+    const panel = document.getElementById('update-panel');
+    const apply = document.getElementById('update-apply-btn');
+    if (!btn || btn.dataset.wired) return;
+    btn.dataset.wired = '1';
+
+    btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const open = panel && !panel.classList.contains('hidden');
+        if (panel) {
+            panel.classList.toggle('hidden', open);
+            btn.setAttribute('aria-expanded', open ? 'false' : 'true');
+        }
+        if (!open) renderUpdatePanel();
+    });
+
+    document.addEventListener('click', e => {
+        const wrap = document.getElementById('update-wrap');
+        if (!wrap || !panel || panel.classList.contains('hidden')) return;
+        if (wrap.contains(e.target)) return;
+        panel.classList.add('hidden');
+        btn.setAttribute('aria-expanded', 'false');
+    });
+
+    apply?.addEventListener('click', async () => {
+        await applyUpdate();
+    });
+}
+
+async function loadLocalVersion() {
+    try {
+        const res = await fetch('/api/version');
+        if (!res.ok) return;
+        const m = await res.json();
+        if (m && m.version) {
+            const label = document.getElementById('version-label');
+            if (label) label.textContent = 'v' + m.version;
+        }
+    } catch (err) {}
+}
+
+/**
+ * Daily update check (server caches for 24h). Triggered once per page load
+ * when the dashboard mounts; subsequent navigations reuse state.updateStatus.
+ */
+async function checkForUpdatesOnDashboard() {
+    ensureUpdatePanelWired();
+    if (!state.updateCheckStarted) {
+        state.updateCheckStarted = true;
+        await loadLocalVersion();
+        try {
+            const res = await fetch('/api/update/check');
+            if (res.ok) {
+                state.updateStatus = await res.json();
+            }
+        } catch (err) {}
+        renderUpdateChrome();
+    } else {
+        renderUpdateChrome();
+    }
+}
+
+function renderUpdateChrome() {
+    const d = state.updateStatus;
+    const label = document.getElementById('version-label');
+    const badge = document.getElementById('update-badge');
+    const btn = document.getElementById('version-btn');
+    const apply = document.getElementById('update-apply-btn');
+
+    if (label && d && d.current) {
+        label.textContent = 'v' + d.current;
+    }
+
+    const available = !!(d && d.update_available && d.requires_php_ok !== false);
+    if (badge) {
+        badge.classList.toggle('hidden', !available);
+    }
+    if (btn) {
+        btn.classList.toggle('border-amber-300', available);
+        btn.classList.toggle('dark:border-amber-700', available);
+        btn.classList.toggle('text-amber-700', available);
+        btn.classList.toggle('dark:text-amber-400', available);
+        if (available && d.latest) {
+            btn.title = `Update available: v${d.current} → v${d.latest}`;
+        } else if (d && d.current) {
+            btn.title = `Command Center v${d.current}` + (d.install_kind === 'git' ? ' (git)' : '');
+        }
+    }
+    if (apply) {
+        apply.classList.toggle('hidden', !available);
+        apply.disabled = !!(d && d.dirty);
+    }
+    renderUpdatePanel();
+}
+
+function renderUpdatePanel() {
+    const body = document.getElementById('update-panel-body');
+    const link = document.getElementById('update-changelog-link');
+    const msg = document.getElementById('update-panel-msg');
+    if (!body) return;
+
+    const d = state.updateStatus;
+    if (!d) {
+        body.innerHTML = '<div>checking for updates…</div>';
+        return;
+    }
+
+    const rows = [];
+    rows.push(['Installed', 'v' + (d.current || '?')]);
+    if (d.latest) rows.push(['Latest', 'v' + d.latest]);
+    rows.push(['Install', d.install_kind === 'git' ? 'git' : 'package']);
+    if (d.update_available) {
+        rows.push(['Status', d.requires_php_ok === false
+            ? 'needs PHP ' + (d.requires_php || '?') + '+'
+            : (d.dirty ? 'working tree dirty' : 'update available')]);
+    } else if (d.remote_error) {
+        rows.push(['Status', d.remote_error]);
+    } else {
+        rows.push(['Status', 'up to date']);
+    }
+    if (d.checked_at) {
+        const t = new Date(d.checked_at * 1000);
+        rows.push(['Checked', t.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) + (d.cached ? ' (cached)' : '')]);
+    }
+
+    body.innerHTML = rows.map(([k, v]) =>
+        `<div class="flex justify-between gap-3"><span class="text-zinc-400 dark:text-cc-dim shrink-0">${esc(k)}</span><span class="text-right text-zinc-700 dark:text-cc-soft break-all">${esc(v)}</span></div>`
+    ).join('');
+
+    if (link && d.changelog) {
+        link.href = d.changelog;
+    }
+    if (msg && !msg.dataset.sticky) {
+        msg.classList.add('hidden');
+        msg.textContent = '';
+    }
+}
+
+async function applyUpdate() {
+    const apply = document.getElementById('update-apply-btn');
+    const msg = document.getElementById('update-panel-msg');
+    if (apply) {
+        apply.disabled = true;
+        apply.textContent = 'Updating…';
+    }
+    if (msg) {
+        msg.dataset.sticky = '1';
+        msg.classList.remove('hidden');
+        msg.textContent = 'Applying update…';
+        msg.classList.remove('text-red-600', 'dark:text-red-400', 'text-emerald-600', 'dark:text-emerald-400');
+    }
+    try {
+        const res = await fetch('/api/update', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) {
+            if (msg) {
+                msg.textContent = data.message || 'Update failed.';
+                msg.classList.add('text-red-600', 'dark:text-red-400');
+            }
+            if (apply) {
+                apply.disabled = false;
+                apply.textContent = 'Update now';
+            }
+            return;
+        }
+        if (msg) {
+            msg.textContent = (data.message || 'Updated.') + ' Reloading…';
+            msg.classList.add('text-emerald-600', 'dark:text-emerald-400');
+        }
+        setTimeout(() => location.reload(), 600);
+    } catch (err) {
+        if (msg) {
+            msg.textContent = 'Update request failed.';
+            msg.classList.add('text-red-600', 'dark:text-red-400');
+        }
+        if (apply) {
+            apply.disabled = false;
+            apply.textContent = 'Update now';
+        }
+    }
+}
+
 // ─── Index Status (tucked beside reindex on the dashboard) ───
 async function loadIndexStatus() {
     try {
@@ -486,6 +672,8 @@ function renderDashboard() {
         return;
     }
     state.activeRoute = 'dashboard';
+    // Daily remote check (server-side 24h cache). Nav chip lives outside #app.
+    checkForUpdatesOnDashboard();
     app.innerHTML = `
         <div class="space-y-4">
             <!-- Search -->
@@ -2424,6 +2612,8 @@ function updateDarkIcons() {
 }
 updateDarkIcons();
 
+ensureUpdatePanelWired();
+loadLocalVersion();
 loadIndexStatus();
 
 // Initial route.

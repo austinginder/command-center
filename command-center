@@ -47,6 +47,7 @@ require BASE_DIR . '/app/SessionRegistry.php';
 require BASE_DIR . '/app/Retention.php';
 require BASE_DIR . '/app/SearchIndex.php';
 require BASE_DIR . '/app/FlowExtractor.php';
+require BASE_DIR . '/app/Updater.php';
 
 // ─── Argument Parsing ────────────────────────────────────────
 
@@ -317,40 +318,13 @@ function cmdOpen( string $sessionId ): void {
 
 // ─── Version & Update ────────────────────────────────────────
 
-function localManifest(): array {
-	$file = BASE_DIR . '/manifest.json';
-	if ( ! is_readable( $file ) ) {
-		fwrite( STDERR, "Missing manifest.json - is this a complete install?\n" );
-		exit( 3 );
-	}
-	$manifest = json_decode( file_get_contents( $file ), true );
-	if ( ! is_array( $manifest ) || empty( $manifest['version'] ) ) {
-		fwrite( STDERR, "Invalid manifest.json.\n" );
-		exit( 3 );
-	}
-	return $manifest;
-}
-
-function remoteManifest(): ?array {
-	$context = stream_context_create( [
-		'http' => [
-			'timeout' => 15,
-			'header'  => "Accept: application/json\r\nUser-Agent: command-center-cli\r\n",
-		],
-	] );
-	$body = @file_get_contents( 'https://raw.githubusercontent.com/austinginder/command-center/main/manifest.json', false, $context );
-	if ( $body === false ) {
-		return null;
-	}
-	$manifest = json_decode( $body, true );
-	if ( ! is_array( $manifest ) || empty( $manifest['version'] ) ) {
-		return null;
-	}
-	return $manifest;
-}
-
 function cmdVersion( bool $useJson ): void {
-	$manifest = localManifest();
+	try {
+		$manifest = Updater::localManifest();
+	} catch ( \Throwable $e ) {
+		fwrite( STDERR, $e->getMessage() . "\n" );
+		exit( 3 );
+	}
 	if ( $useJson ) {
 		echo json_encode( $manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) . "\n";
 	} else {
@@ -360,34 +334,52 @@ function cmdVersion( bool $useJson ): void {
 }
 
 function cmdUpdate( array $flags, bool $useJson, bool $useColor ): void {
-	$local  = localManifest();
-	$remote = remoteManifest();
-
-	if ( $remote === null ) {
-		fwrite( STDERR, "Could not reach GitHub to check for updates.\n" );
+	// --check uses cache; apply always re-fetches inside Updater::apply().
+	$force = empty( $flags['check'] );
+	try {
+		$status = Updater::status( $force );
+	} catch ( \Throwable $e ) {
+		fwrite( STDERR, $e->getMessage() . "\n" );
 		exit( 3 );
 	}
 
-	$current = $local['version'];
-	$latest  = $remote['version'];
+	if ( ! empty( $status['remote_error'] ) && $status['latest'] === null ) {
+		fwrite( STDERR, $status['remote_error'] . "\n" );
+		exit( 3 );
+	}
 
-	if ( ! version_compare( $latest, $current, '>' ) ) {
+	$current = $status['current'];
+	$latest  = $status['latest'] ?? $current;
+
+	if ( empty( $status['update_available'] ) ) {
 		if ( $useJson ) {
-			echo json_encode( [ 'current' => $current, 'latest' => $latest, 'update_available' => false ], JSON_PRETTY_PRINT ) . "\n";
+			echo json_encode( [
+				'current'          => $current,
+				'latest'           => $latest,
+				'update_available' => false,
+				'install_kind'     => $status['install_kind'],
+			], JSON_PRETTY_PRINT ) . "\n";
 		} else {
 			echo "Already up to date (v{$current}).\n";
 		}
 		exit( 0 );
 	}
 
-	if ( ! empty( $remote['requires_php'] ) && version_compare( PHP_VERSION, $remote['requires_php'], '<' ) ) {
-		fwrite( STDERR, "v{$latest} requires PHP {$remote['requires_php']}+ (you have " . PHP_VERSION . ").\n" );
+	if ( empty( $status['requires_php_ok'] ) ) {
+		$req = $status['requires_php'] ?? '?';
+		fwrite( STDERR, "v{$latest} requires PHP {$req}+ (you have " . PHP_VERSION . ").\n" );
 		exit( 3 );
 	}
 
 	if ( ! empty( $flags['check'] ) ) {
 		if ( $useJson ) {
-			echo json_encode( [ 'current' => $current, 'latest' => $latest, 'update_available' => true ], JSON_PRETTY_PRINT ) . "\n";
+			echo json_encode( [
+				'current'          => $current,
+				'latest'           => $latest,
+				'update_available' => true,
+				'install_kind'     => $status['install_kind'],
+				'download_url'     => $status['download_url'],
+			], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) . "\n";
 		} else {
 			echo "Update available: v{$current} → v{$latest}\n";
 			echo "Run " . bold( 'command-center update', $useColor ) . " to install.\n";
@@ -396,93 +388,17 @@ function cmdUpdate( array $flags, bool $useJson, bool $useColor ): void {
 	}
 
 	echo "Updating v{$current} → v{$latest}...\n";
-
-	if ( is_dir( BASE_DIR . '/.git' ) ) {
-		updateViaGit();
+	$result = Updater::apply();
+	if ( empty( $result['ok'] ) ) {
+		fwrite( STDERR, ( $result['message'] ?? 'Update failed.' ) . "\n" );
+		exit( 3 );
+	}
+	if ( $useJson ) {
+		echo json_encode( $result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) . "\n";
 	} else {
-		updateViaZip( $remote );
+		echo ( $result['message'] ?? "Updated to v{$latest}." ) . "\n";
 	}
-
-	$new = json_decode( file_get_contents( BASE_DIR . '/manifest.json' ), true );
-	echo "Updated to v" . ( $new['version'] ?? $latest ) . ".\n";
 	exit( 0 );
-}
-
-function updateViaGit(): void {
-	exec( 'git -C ' . escapeshellarg( BASE_DIR ) . ' status --porcelain 2>&1', $dirty, $code );
-	if ( $code !== 0 ) {
-		fwrite( STDERR, "git status failed - update manually with git pull.\n" );
-		exit( 3 );
-	}
-	if ( ! empty( $dirty ) ) {
-		fwrite( STDERR, "Working tree has local changes - commit or stash them, then run update again.\n" );
-		exit( 3 );
-	}
-	exec( 'git -C ' . escapeshellarg( BASE_DIR ) . ' pull --ff-only origin main 2>&1', $out, $code );
-	if ( $code !== 0 ) {
-		fwrite( STDERR, "git pull failed:\n" . implode( "\n", $out ) . "\n" );
-		exit( 3 );
-	}
-}
-
-function updateViaZip( array $remote ): void {
-	if ( empty( $remote['download_url'] ) ) {
-		fwrite( STDERR, "Remote manifest has no download_url.\n" );
-		exit( 3 );
-	}
-	if ( ! class_exists( 'ZipArchive' ) ) {
-		fwrite( STDERR, "PHP zip extension is required for non-git updates.\n" );
-		exit( 3 );
-	}
-
-	$tmpZip = tempnam( sys_get_temp_dir(), 'cc-update-' ) . '.zip';
-	$context = stream_context_create( [ 'http' => [ 'timeout' => 60, 'header' => "User-Agent: command-center-cli\r\n", 'follow_location' => 1 ] ] );
-	$data = @file_get_contents( $remote['download_url'], false, $context );
-	if ( $data === false || file_put_contents( $tmpZip, $data ) === false ) {
-		fwrite( STDERR, "Download failed: {$remote['download_url']}\n" );
-		exit( 3 );
-	}
-
-	$tmpDir = sys_get_temp_dir() . '/cc-update-' . getmypid();
-	$zip    = new ZipArchive();
-	if ( $zip->open( $tmpZip ) !== true || ! $zip->extractTo( $tmpDir ) ) {
-		fwrite( STDERR, "Could not extract update archive.\n" );
-		exit( 3 );
-	}
-	$zip->close();
-	unlink( $tmpZip );
-
-	// GitHub tag archives wrap everything in a single top-level directory.
-	$entries = array_values( array_diff( scandir( $tmpDir ), [ '.', '..' ] ) );
-	$root    = ( count( $entries ) === 1 && is_dir( "{$tmpDir}/{$entries[0]}" ) ) ? "{$tmpDir}/{$entries[0]}" : $tmpDir;
-
-	copyTree( $root, BASE_DIR );
-
-	exec( 'rm -rf ' . escapeshellarg( $tmpDir ) );
-}
-
-function copyTree( string $src, string $dest ): void {
-	// Never touch local data (search index, caches) or version control.
-	$skip = [ 'data', '.git' ];
-	foreach ( array_diff( scandir( $src ), [ '.', '..' ] ) as $entry ) {
-		if ( in_array( $entry, $skip, true ) ) {
-			continue;
-		}
-		$from = "{$src}/{$entry}";
-		$to   = "{$dest}/{$entry}";
-		if ( is_dir( $from ) ) {
-			if ( ! is_dir( $to ) ) {
-				mkdir( $to, 0755, true );
-			}
-			copyTree( $from, $to );
-		} else {
-			copy( $from, $to );
-			// Preserve executability (the CLI script itself).
-			if ( is_executable( $from ) ) {
-				chmod( $to, 0755 );
-			}
-		}
-	}
 }
 
 // ─── Flow ────────────────────────────────────────────────────

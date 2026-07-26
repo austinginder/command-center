@@ -4,6 +4,10 @@ All notable changes to Command Center are documented here.
 
 ## Unreleased
 
+### Added
+
+- **Web UI self-updater** - nav version chip checks GitHub daily on dashboard load (24h server cache). Panel shows installed vs latest; **Update now** runs the same path as the CLI (git pull or release zip). `GET /api/version`, `GET /api/update/check`, `POST /api/update`. Shared `app/Updater.php` powers CLI and UI. `COMMAND_CENTER_UPDATE_CHECK=0` disables remote checks. Release packages should use `command-center.zip` on the GitHub release asset (see manifest `download_url`).
+
 ### Improved
 
 - **Grok Build rename** - provider label is now "Grok Build" (was "Grok Code").

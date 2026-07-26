@@ -34,6 +34,7 @@ Tools you don't use are skipped automatically. Each location can be overridden w
 - **Retention monitor** - optional per-provider TTL warnings when agent tools auto-delete old transcripts.
 - **Model + live chips** - model labels on list rows when available (Grok Build includes reasoning effort); Grok Build shows a live badge for sessions still running, plus duration/tools/LOC and context window when signals are present.
 - **Index health** - listed / indexed / skipped / stale coverage in a dashboard popover next to reindex (not in the nav).
+- **Self-update** - nav version chip checks GitHub once a day on dashboard load; Update applies a git pull or the release package. Same engine as `command-center update`.
 - **`command-center` CLI** - search and inspect your history from the terminal, including `flow`: reconstruct how a project was built from its transcripts.
 
 ## Install
@@ -73,13 +74,15 @@ Full CLI reference: [command-center-cli.md](command-center-cli.md).
 
 ### Updating
 
+The dashboard nav shows the installed version and checks for updates once per day (cached server-side). When a newer release is available, click **Update** in the version panel - or use the CLI:
+
 ```bash
 command-center version          # installed version
 command-center update --check   # is a newer release available?
 command-center update           # update in place
 ```
 
-`update` compares the local `manifest.json` against the latest release manifest on GitHub. Git installs are updated with a fast-forward pull (it refuses if the working tree has local changes). Non-git installs download the release archive and copy it over the install, leaving `data/` untouched.
+Both the UI and CLI compare the local `manifest.json` against the latest release manifest on GitHub (`main`). Git installs are updated with a fast-forward pull (they refuse if the working tree has local changes). Non-git installs download the release package (`command-center.zip` from the GitHub release) and copy it over the install, leaving `data/` untouched. Set `COMMAND_CENTER_UPDATE_CHECK=0` to disable remote checks.
 
 ## API
 
@@ -106,7 +109,7 @@ GET  /stream?session={id}              SSE replay of a session
 Your conversation history is sensitive. Command Center is designed to be run **locally only**:
 
 - All transcript reads and the FTS index live on your machine (`data/` - gitignored).
-- No analytics, no phone-home, no external requests from the backend. (The UI shell loads Tailwind, marked.js, and fonts from CDNs. `command-center update` contacts GitHub, but only when you run it.)
+- No analytics, no phone-home. (The UI shell loads Tailwind, marked.js, and fonts from CDNs. Update checks contact GitHub at most once per day when the dashboard loads, or when you run `command-center update`.)
 - Don't host it on a public server unless you put authentication in front of it - the app itself has none.
 
 ## Adding a provider

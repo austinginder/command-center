@@ -89,6 +89,23 @@ $assetVer = function ( string $path ): string {
         </a>
         <div class="flex items-center gap-3">
             <a href="/usage" data-route id="nav-usage" class="text-xs font-mono text-zinc-400 dark:text-cc-dim hover:text-zinc-600 dark:hover:text-cc-mut transition-colors">USAGE</a>
+            <div class="relative" id="update-wrap">
+                <button type="button" id="version-btn"
+                    class="relative inline-flex items-center gap-1.5 text-xs font-mono px-2 py-1 rounded-lg border border-zinc-200 dark:border-cc-line text-zinc-400 dark:text-cc-dim hover:text-zinc-600 dark:hover:text-cc-mut hover:border-zinc-300 dark:hover:border-cc-line3 transition-colors"
+                    title="Version and updates" aria-expanded="false" aria-controls="update-panel">
+                    <span id="version-label">…</span>
+                    <span id="update-badge" class="hidden text-[10px] font-semibold tracking-wide text-amber-700 dark:text-amber-400">UPDATE</span>
+                </button>
+                <div id="update-panel" class="hidden absolute right-0 z-40 mt-1 w-72 rounded-lg border border-zinc-200 dark:border-cc-line3 bg-white dark:bg-cc-card shadow-xl p-3 space-y-2">
+                    <div class="text-[10px] font-mono font-semibold uppercase tracking-widest text-zinc-400 dark:text-cc-dim">Command Center</div>
+                    <div id="update-panel-body" class="text-[11px] font-mono space-y-1 text-zinc-500 dark:text-cc-dim">loading…</div>
+                    <div class="flex items-center gap-2 pt-1">
+                        <button type="button" id="update-apply-btn" class="hidden px-2.5 py-1 text-[11px] font-medium rounded-lg bg-zinc-900 text-white dark:bg-cc-ink dark:text-cc-bg disabled:opacity-40">Update now</button>
+                        <a id="update-changelog-link" href="https://github.com/austinginder/command-center/blob/main/CHANGELOG.md" target="_blank" rel="noopener" class="text-[11px] font-mono text-zinc-400 dark:text-cc-dim hover:text-zinc-600 dark:hover:text-cc-mut">Changelog</a>
+                    </div>
+                    <div id="update-panel-msg" class="hidden text-[11px] font-mono text-zinc-500 dark:text-cc-dim"></div>
+                </div>
+            </div>
             <button id="dark-toggle" type="button" class="text-zinc-400 dark:text-cc-dim hover:text-zinc-600 dark:hover:text-cc-mut p-1 rounded transition-colors" title="Toggle dark mode">
                 <svg id="icon-moon" class="w-3.5 h-3.5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
                 <svg id="icon-sun" class="w-3.5 h-3.5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>

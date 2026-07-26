@@ -8,6 +8,40 @@ $uri    = parse_url( $_SERVER['REQUEST_URI'], PHP_URL_PATH );
 $path   = preg_replace( '#^/api#', '', $uri );
 $path   = rtrim( $path, '/' ) ?: '/';
 
+// GET /api/version - local manifest only (no network)
+if ( $method === 'GET' && $path === '/version' ) {
+	try {
+		echo json_encode( Updater::localManifest() );
+	} catch ( \Throwable $e ) {
+		http_response_code( 500 );
+		echo json_encode( [ 'error' => $e->getMessage() ] );
+	}
+	exit;
+}
+
+// GET /api/update/check - status (+ daily cache). ?force=1 bypasses cache.
+if ( $method === 'GET' && $path === '/update/check' ) {
+	$force = isset( $_GET['force'] ) && ( $_GET['force'] === '1' || $_GET['force'] === 'true' );
+	try {
+		echo json_encode( Updater::status( $force ) );
+	} catch ( \Throwable $e ) {
+		http_response_code( 500 );
+		echo json_encode( [ 'error' => $e->getMessage() ] );
+	}
+	exit;
+}
+
+// POST /api/update - apply available update (git pull or zip package)
+if ( $method === 'POST' && $path === '/update' ) {
+	set_time_limit( 180 );
+	$result = Updater::apply();
+	if ( empty( $result['ok'] ) ) {
+		http_response_code( 409 );
+	}
+	echo json_encode( $result );
+	exit;
+}
+
 // GET /api/sessions - list sessions across providers (optionally filtered by source/project)
 // Optional: expiring=<days> keeps only sessions at risk within that window (incl. expired).
 if ( $method === 'GET' && $path === '/sessions' ) {

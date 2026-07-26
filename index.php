@@ -16,6 +16,7 @@ require BASE_DIR . '/app/GrokSessions.php';
 require BASE_DIR . '/app/CodexSessions.php';
 require BASE_DIR . '/app/SessionRegistry.php';
 require BASE_DIR . '/app/Retention.php';
+require BASE_DIR . '/app/Updater.php';
 require BASE_DIR . '/app/Router.php';
 
 Router::dispatch();
