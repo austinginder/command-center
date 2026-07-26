@@ -1,22 +1,23 @@
 <?php
 
 /**
- * Grok Code (xAI) session provider - reads from ~/.grok/sessions.
+ * Grok Build (xAI / SpaceXAI) session provider - reads from ~/.grok/sessions.
  *
- * Layout (see ~/.grok/docs/user-guide/17-sessions.md):
+ * Layout (see ~/.grok/docs/user-guide/17-sessions.md and the open-source
+ * harness at github.com/xai-org/grok-build):
  *
  *   ~/.grok/sessions/<url-encoded-cwd>/<session-id>/
  *     summary.json          - title, timestamps, model, message counts, session_kind,
- *                             reasoning_effort, agent_name (persona/role)
+ *                             reasoning_effort, agent_name (persona/role), sandbox_profile
  *     updates.jsonl         - ACP session/update stream (authoritative conversation)
  *     signals.json          - counters: context tokens, duration, turns, tools, LOC
  *     chat_history.jsonl    - raw model messages (not used for UI replay)
- *     plan.json / rewind_points.jsonl / subagents/ …
+ *     plan.json / rewind_points.jsonl / subagents/ / terminal/ …
  *
- * Subagent runs are full session directories with summary.session_kind =
- * "subagent". They are hidden from listSessions/listProjects (same idea as
- * Claude nesting children under the parent) but remain openable by id via
- * hasSession/getConversation.
+ * Nested child runs use summary.session_kind of "subagent", "subagent_fork",
+ * or "subagent_resume". They are hidden from listSessions/listProjects (same
+ * idea as Claude nesting children under the parent) but remain openable by
+ * id via hasSession/getConversation.
  *
  * When the encoded cwd exceeds 255 bytes, Grok uses a slug+hash directory
  * and records the real path in a `.cwd` file inside the group.
@@ -33,7 +34,7 @@ class GrokSessions {
 	}
 
 	public static function sourceLabel(): string {
-		return 'Grok Code';
+		return 'Grok Build';
 	}
 
 	public static function hasSession( string $sessionId ): bool {
@@ -76,14 +77,13 @@ class GrokSessions {
 	/**
 	 * Token usage for the heatmap / usage views.
 	 *
-	 * Prefer signals.json when present: totalTokensBeforeCompaction is Grok's
-	 * own rollup of context tokens that entered the window (including segments
-	 * later compacted). Peak-segment summing of _meta.totalTokens overcounts
-	 * badly on long sessions.
+	 * Prefer the last turn_completed.usage block in updates.jsonl (API-reported
+	 * input/output/cache, cumulative for the session). That is the measured path
+	 * used by SessionRegistry::usageType('grok').
 	 *
-	 * There is still no per-request output counter, so output is estimated from
-	 * streamed message/thought text at ~4 chars per token. Provider stays
-	 * 'estimated' (see SessionRegistry::usageType()).
+	 * Fallback when no turn_completed usage exists (mid-turn / older logs):
+	 * signals.json context tokens for input, output estimated from streamed
+	 * agent text at ~4 chars per token.
 	 */
 	public static function extractUsage( array $session ): ?array {
 		$dir = self::findSessionDir( $session['id'] ?? '', $session['project'] ?? null );
@@ -91,6 +91,70 @@ class GrokSessions {
 			return null;
 		}
 
+		$file = $dir . '/updates.jsonl';
+		$measured = self::usageFromTurnCompleted( $file );
+		if ( $measured !== null ) {
+			return $measured;
+		}
+
+		return self::usageEstimatedFallback( $dir, $file );
+	}
+
+	/**
+	 * Last turn_completed.usage in updates.jsonl (cumulative session bill).
+	 * Do not sum turns - each event already carries running totals.
+	 *
+	 * @return array{input:int,output:int,cache_read:int,cache_creation:int}|null
+	 */
+	private static function usageFromTurnCompleted( string $file ): ?array {
+		if ( $file === '' || ! is_file( $file ) ) {
+			return null;
+		}
+		$fp = @fopen( $file, 'r' );
+		if ( ! $fp ) {
+			return null;
+		}
+
+		$last = null;
+		while ( ( $line = fgets( $fp ) ) !== false ) {
+			if ( strpos( $line, 'turn_completed' ) === false || strpos( $line, 'usage' ) === false ) {
+				continue;
+			}
+			$obj = json_decode( $line, true );
+			if ( ! is_array( $obj ) ) {
+				continue;
+			}
+			$update = $obj['params']['update'] ?? null;
+			if ( ! is_array( $update ) || ( $update['sessionUpdate'] ?? '' ) !== 'turn_completed' ) {
+				continue;
+			}
+			$usage = $update['usage'] ?? null;
+			if ( ! is_array( $usage ) ) {
+				continue;
+			}
+			$input  = (int) ( $usage['inputTokens'] ?? 0 );
+			$output = (int) ( $usage['outputTokens'] ?? 0 );
+			$cache  = (int) ( $usage['cachedReadTokens'] ?? 0 );
+			if ( $input === 0 && $output === 0 && $cache === 0 ) {
+				continue;
+			}
+			$last = [
+				'input'          => $input,
+				'output'         => $output,
+				'cache_read'     => $cache,
+				'cache_creation' => 0,
+			];
+		}
+		fclose( $fp );
+		return $last;
+	}
+
+	/**
+	 * Pre-usage-field / mid-turn fallback from signals + streamed text length.
+	 *
+	 * @return array{input:int,output:int,cache_read:int,cache_creation:int}|null
+	 */
+	private static function usageEstimatedFallback( string $dir, string $file ): ?array {
 		$inputFromSignals = null;
 		$signals          = self::readJson( $dir . '/signals.json' );
 		if ( is_array( $signals ) ) {
@@ -99,13 +163,11 @@ class GrokSessions {
 			if ( $before > 0 ) {
 				$inputFromSignals = $before;
 			} elseif ( $used > 0 ) {
-				// Short sessions may never compact; current context is the best figure.
 				$inputFromSignals = $used;
 			}
 		}
 
-		$file = $dir . '/updates.jsonl';
-		if ( ! file_exists( $file ) ) {
+		if ( $file === '' || ! is_file( $file ) ) {
 			if ( $inputFromSignals === null ) {
 				return null;
 			}
@@ -117,7 +179,7 @@ class GrokSessions {
 			];
 		}
 
-		$fp = fopen( $file, 'r' );
+		$fp = @fopen( $file, 'r' );
 		if ( ! $fp ) {
 			if ( $inputFromSignals === null ) {
 				return null;
@@ -130,8 +192,6 @@ class GrokSessions {
 			];
 		}
 
-		// When signals already supplied input, only scan for output text.
-		// Otherwise also rebuild input from _meta.totalTokens peaks.
 		$needContext = $inputFromSignals === null;
 		$peak        = 0;
 		$context     = 0;
@@ -157,7 +217,7 @@ class GrokSessions {
 				if ( is_numeric( $t ) ) {
 					$t = (int) $t;
 					if ( $t < $peak ) {
-						$context += $peak; // compaction reset - bank the segment peak
+						$context += $peak;
 					}
 					$peak = $t;
 				}
@@ -176,7 +236,6 @@ class GrokSessions {
 		}
 
 		$input = $inputFromSignals !== null ? $inputFromSignals : $context;
-
 		if ( $input === 0 && $outChars === 0 ) {
 			return null;
 		}
@@ -412,6 +471,9 @@ class GrokSessions {
 	 *   agent_thought_chunk → skipped
 	 *   tool_call           → tool_call
 	 *   tool_call_update (status=completed) → tool_result
+	 *   session_recap       → summary
+	 *   task_backgrounded   → tool_call (Bash / background)
+	 *   task_completed      → tool_result (terminal output preview)
 	 */
 	public static function getConversation( string $sessionId ): array {
 		$dir = self::findSessionDir( $sessionId );
@@ -598,6 +660,79 @@ class GrokSessions {
 				continue;
 			}
 
+			// Auto mid-session recap (also indexed for FTS).
+			if ( $type === 'session_recap' ) {
+				$flushUser();
+				$flushAgent();
+				$recap = trim( (string) ( $update['summary'] ?? '' ) );
+				if ( $recap !== '' ) {
+					$events[] = [
+						'type' => 'summary',
+						'text' => $recap,
+						'_ts'  => $ts,
+					];
+				}
+				continue;
+			}
+
+			// Background shell tasks (timeout / bg operator) with terminal log output.
+			if ( $type === 'task_backgrounded' ) {
+				$flushUser();
+				$flushAgent();
+				$cmd  = (string) ( $update['command'] ?? '' );
+				$desc = trim( (string) ( $update['description'] ?? '' ) );
+				$label = $desc !== '' ? $desc : mb_substr( $cmd, 0, 150 );
+				if ( $label === '' ) {
+					$label = 'background task';
+				}
+				$events[] = [
+					'type'     => 'tool_call',
+					'tool'     => 'Bash',
+					'category' => 'shell',
+					'label'    => $label . ' (bg)',
+					'_ts'      => $ts,
+				];
+				continue;
+			}
+
+			if ( $type === 'task_completed' ) {
+				$flushUser();
+				$flushAgent();
+				$snap   = is_array( $update['task_snapshot'] ?? null ) ? $update['task_snapshot'] : [];
+				$output = (string) ( $snap['output'] ?? '' );
+				// Prefer in-event output; fall back to terminal log file when empty.
+				if ( $output === '' ) {
+					$taskId = (string) ( $snap['task_id'] ?? $update['task_id'] ?? '' );
+					if ( $taskId !== '' && $dir ) {
+						$logPath = $dir . '/terminal/' . $taskId . '.log';
+						if ( is_file( $logPath ) ) {
+							$raw = @file_get_contents( $logPath );
+							if ( is_string( $raw ) && $raw !== '' ) {
+								// Tail large logs - keep last 8k for a useful preview source.
+								if ( strlen( $raw ) > 8192 ) {
+									$raw = substr( $raw, -8192 );
+								}
+								$output = $raw;
+							}
+						}
+					}
+				}
+				if ( $output !== '' ) {
+					// Strip common ANSI so the viewer is readable.
+					$output  = preg_replace( '/\x1b\[[0-9;?]*[a-zA-Z]/', '', $output ) ?? $output;
+					$preview = ClaudeSessions::cleanResultText( mb_substr( $output, 0, 500 ) );
+					if ( $preview !== '' ) {
+						$events[] = [
+							'type'    => 'tool_result',
+							'preview' => $preview,
+							'length'  => mb_strlen( $output ),
+							'_ts'     => $ts,
+						];
+					}
+				}
+				continue;
+			}
+
 			// tool_call_update / agent_thought_chunk / other → flush text runs, skip body.
 			if ( $type === 'tool_call_update' || $type === 'agent_thought_chunk' ) {
 				$flushUser();
@@ -714,11 +849,19 @@ class GrokSessions {
 	}
 
 	/**
-	 * Spawned child agents get their own session dir with session_kind=subagent.
-	 * Primary / forked sessions omit the field or use another value.
+	 * Nested child agents live in their own session dirs.
+	 *
+	 * session_kind values from Grok Build (see open-source session storage):
+	 *   subagent, subagent_fork, subagent_resume
+	 * Primary sessions omit the field. User-level /fork peers keep parent_session_id
+	 * without a subagent* kind and stay top-level.
 	 */
 	private static function isSubagentSession( array $summary ): bool {
-		return ( $summary['session_kind'] ?? '' ) === 'subagent';
+		$kind = (string) ( $summary['session_kind'] ?? '' );
+		if ( $kind === '' ) {
+			return false;
+		}
+		return $kind === 'subagent' || str_starts_with( $kind, 'subagent_' );
 	}
 
 	/**
@@ -776,7 +919,13 @@ class GrokSessions {
 			$record['agent_name'] = $agentName;
 		}
 
-		// signals.json rollup: duration, turns, tools, LOC (cheap small JSON).
+		// summary.sandbox_profile (e.g. off, workspace-write).
+		$sandbox = trim( (string) ( $summary['sandbox_profile'] ?? '' ) );
+		if ( $sandbox !== '' ) {
+			$record['sandbox_profile'] = $sandbox;
+		}
+
+		// signals.json rollup: duration, turns, tools, LOC, context window.
 		self::attachSignalsRollup( $record, $sessionDir );
 
 		// Live chip when ~/.grok/active_sessions.json lists this session with a live PID.
@@ -857,6 +1006,22 @@ class GrokSessions {
 			if ( $clean ) {
 				$record['tools_used'] = $clean;
 			}
+		}
+
+		// Context window meter (for session detail meta).
+		$ctxUsed  = (int) ( $signals['contextTokensUsed'] ?? 0 );
+		$ctxTotal = (int) ( $signals['contextWindowTokens'] ?? 0 );
+		$ctxPct   = (int) ( $signals['contextWindowUsage'] ?? 0 );
+		if ( $ctxUsed > 0 ) {
+			$record['context_tokens_used'] = $ctxUsed;
+		}
+		if ( $ctxTotal > 0 ) {
+			$record['context_window_tokens'] = $ctxTotal;
+		}
+		if ( $ctxPct > 0 ) {
+			$record['context_window_pct'] = $ctxPct;
+		} elseif ( $ctxUsed > 0 && $ctxTotal > 0 ) {
+			$record['context_window_pct'] = (int) min( 100, round( ( $ctxUsed / $ctxTotal ) * 100 ) );
 		}
 	}
 
@@ -1132,9 +1297,24 @@ class GrokSessions {
 			'open_page'                      => 'WebFetch',
 			'open_page_with_find'            => 'WebFetch',
 			'todo_write'                     => 'TodoWrite',
+			'update_goal'                    => 'TodoWrite',
 			'spawn_subagent'                 => 'Task',
 			'get_command_or_subagent_output' => 'Task',
 			'kill_command_or_subagent'       => 'Task',
+			'monitor'                        => 'Task',
+			'workflow'                       => 'Task',
+			'ask_user_question'              => 'AskUserQuestion',
+			'enter_plan_mode'                => 'EnterPlanMode',
+			'exit_plan_mode'                 => 'ExitPlanMode',
+			'search_tool'                    => 'ToolSearch',
+			'use_tool'                       => 'ToolSearch',
+			'image_gen'                      => 'ImageGen',
+			'image_edit'                     => 'ImageEdit',
+			'image_to_video'                 => 'ImageToVideo',
+			'reference_to_video'             => 'ImageToVideo',
+			'scheduler_create'               => 'CronCreate',
+			'scheduler_delete'               => 'CronDelete',
+			'scheduler_list'                 => 'CronList',
 			// Already-PascalCase / Anthropic-style names seen in older logs
 			'read'                           => 'Read',
 			'shell'                          => 'Bash',
@@ -1145,6 +1325,8 @@ class GrokSessions {
 			'todowrite'                      => 'TodoWrite',
 			'task'                           => 'Task',
 			'delete'                         => 'Bash',
+			'awaitshell'                     => 'Bash',
+			'callmcptool'                    => 'ToolSearch',
 		];
 		$key = strtolower( $name );
 		return $map[ $key ] ?? $name;

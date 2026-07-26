@@ -18,7 +18,7 @@ If you bounce between AI coding CLIs, your conversation history ends up scattere
 | T3 Code | `~/.t3` | estimated |
 | Antigravity | `~/.gemini/antigravity-cli/brain` | - |
 | Gemini CLI | `~/.gemini/tmp` | ✅ |
-| Grok CLI | `~/.grok` | estimated |
+| Grok Build | `~/.grok` | ✅ |
 | Codex | `~/.codex` (ChatGPT / VS Code Codex) | ✅ |
 
 Tools you don't use are skipped automatically. Each location can be overridden with an env var (`AMP_HOME`, `CLAUDE_HOME`, `OPENCODE_HOME`, `KIMI_HOME`, `COMMANDCODE_HOME`, `T3CODE_HOME`, `ANTIGRAVITY_HOME`, `GEMINI_HOME`, `GROK_HOME`, `CODEX_HOME`).
@@ -30,9 +30,9 @@ Tools you don't use are skipped automatically. Each location can be overridden w
 - **Session viewer** - replay any conversation: user messages, assistant responses, collapsible tool-call groups, and turn summaries. Large sessions paginate (1000 events per page) so the tab stays responsive.
 - **Resume commands** - one click copies the exact CLI command to resume a session in its original tool and project directory (OpenCode, Kimi, Claude, Grok, and others; T3 opens the desktop app).
 - **Activity heatmap + usage** - GitHub-style sessions-per-day graph with token tooltips; monthly usage page for input / output / cache across providers. Opening a session parks the dashboard DOM so back restores it without refetching.
-- **Token tracking** - recorded usage where tools expose it; estimated usage for Command Code, T3 Code, and Grok.
+- **Token tracking** - recorded usage where tools expose it (including Grok Build `turn_completed.usage`); estimated usage for Command Code and T3 Code.
 - **Retention monitor** - optional per-provider TTL warnings when agent tools auto-delete old transcripts.
-- **Model + live chips** - model labels on list rows when available (Grok includes reasoning effort); Grok shows a live badge for sessions still running, plus duration/tools/LOC when signals are present.
+- **Model + live chips** - model labels on list rows when available (Grok Build includes reasoning effort); Grok Build shows a live badge for sessions still running, plus duration/tools/LOC and context window when signals are present.
 - **Index health** - listed / indexed / skipped / stale coverage in a dashboard popover next to reindex (not in the nav).
 - **`command-center` CLI** - search and inspect your history from the terminal, including `flow`: reconstruct how a project was built from its transcripts.
 

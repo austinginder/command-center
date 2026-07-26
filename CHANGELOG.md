@@ -2,6 +2,17 @@
 
 All notable changes to Command Center are documented here.
 
+## Unreleased
+
+### Improved
+
+- **Grok Build rename** - provider label is now "Grok Build" (was "Grok Code").
+- **Grok Build measured tokens** - usage prefers the last `turn_completed.usage` block in `updates.jsonl` (input/output/cache). Falls back to signals + char estimates when missing. Provider marked measured in usage views.
+- **Grok Build subagent kinds** - hide `subagent_fork` and `subagent_resume` from the top-level list (same as `subagent`).
+- **Grok Build conversation replay** - surface auto `session_recap` summaries and background task start/complete events (terminal log preview).
+- **Grok Build tool map** - map newer tools (`update_goal`, plan mode, monitor, image tools, scheduler, MCP search).
+- **Grok Build session meta** - context window pct/used and non-off sandbox profile in the session detail line.
+
 ## [1.7.0] - 2026-07-15
 
 ### Added

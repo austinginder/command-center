@@ -785,7 +785,7 @@ function resolveAgent( ?string $input ): ?string {
 	}
 
 	fwrite( STDERR, "Unknown agent: {$input}\n" );
-	fwrite( STDERR, "Available: amp, claude (Claude Code), commandcode (Command Code), t3code (T3 Code), opencode (OpenCode), kimi (Kimi), antigravity (Antigravity), grok (Grok Code)\n" );
+	fwrite( STDERR, "Available: amp, claude (Claude Code), commandcode (Command Code), t3code (T3 Code), opencode (OpenCode), kimi (Kimi), antigravity (Antigravity), grok (Grok Build)\n" );
 	exit( 2 );
 }
 
@@ -876,7 +876,7 @@ Available agents:
   opencode, open-code     OpenCode
   kimi                    Kimi
   antigravity, agy        Antigravity
-  grok, grok-code         Grok Code
+  grok, grok-code         Grok Build
 
 Examples:
   command-center "error handling"

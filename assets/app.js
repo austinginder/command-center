@@ -1818,9 +1818,7 @@ function renderUsageView() {
         const note = document.getElementById('usage-note');
         const est = estimatedSet();
         if (approx) {
-            note.textContent = activeSource === 'grok'
-                ? 'Estimated - context tokens come from Grok’s own counter; output is estimated from streamed text at ~4 chars per token.'
-                : 'Estimated from raw transcripts at ~4 chars per token. System prompts and tool schemas are invisible, so real usage runs higher.';
+            note.textContent = 'Estimated from raw transcripts at ~4 chars per token. System prompts and tool schemas are invisible, so real usage runs higher.';
             note.classList.remove('hidden');
         } else {
             const withData = sources.filter(s => est.has(s.id) && rows.some(r => r.source === s.id)).map(s => s.label);
@@ -2033,12 +2031,22 @@ function renderSessionView(sessionId) {
                 if (s.agent_name && String(s.agent_name).toLowerCase() !== 'general-purpose') {
                     parts.push(s.agent_name);
                 }
+                if (s.sandbox_profile && String(s.sandbox_profile).toLowerCase() !== 'off') {
+                    parts.push('sandbox ' + s.sandbox_profile);
+                }
                 if (s.duration_ms != null && s.duration_ms > 0) parts.push(formatDurationMs(s.duration_ms));
                 if (s.turn_count) parts.push(s.turn_count + (s.turn_count === 1 ? ' turn' : ' turns'));
                 if (s.tool_calls != null) parts.push(s.tool_calls + (s.tool_calls === 1 ? ' tool' : ' tools'));
                 const loc = locLabel(s);
                 if (loc) parts.push(loc);
                 if (s.files_touched) parts.push(s.files_touched + (s.files_touched === 1 ? ' file' : ' files'));
+                if (s.context_window_pct != null && s.context_window_pct > 0) {
+                    const used = s.context_tokens_used != null ? formatTokens(s.context_tokens_used) : '';
+                    const total = s.context_window_tokens != null ? formatTokens(s.context_window_tokens) : '';
+                    parts.push(used && total
+                        ? `ctx ${s.context_window_pct}% (${used}/${total})`
+                        : `ctx ${s.context_window_pct}%`);
+                }
                 if (s.originator) parts.push(s.originator);
                 else if (s.codex_source) parts.push(s.codex_source);
                 if (s.cli_version) parts.push('cli ' + s.cli_version);
