@@ -1210,8 +1210,9 @@ function renderDashboard() {
             children.forEach(c => {
                 const cTitle = c.display || c.id;
                 const dur = formatDurationMs(c.duration_ms);
+                const turns = c.turn_count != null ? c.turn_count + (c.turn_count === 1 ? ' turn' : ' turns') : '';
                 const tools = c.tool_calls != null ? c.tool_calls + ' tools' : '';
-                const meta = [c.subagent_type, c.status, dur, tools].filter(Boolean).join(' · ');
+                const meta = [c.subagent_type, c.status, dur, turns, tools].filter(Boolean).join(' · ');
                 const childResume = c.resumable === false
                     ? '<span class="w-[26px] shrink-0"></span>'
                     : copyBtnHtml(src, c.project || s.project, c.id);
@@ -1994,7 +1995,13 @@ function renderSessionView(sessionId) {
         children.forEach(c => {
             const cTitle = c.display || c.id;
             const dur = formatDurationMs(c.duration_ms);
-            const meta = [c.subagent_type, c.status, dur, c.tool_calls != null ? c.tool_calls + ' tools' : ''].filter(Boolean).join(' · ');
+            const meta = [
+                c.subagent_type,
+                c.status,
+                dur,
+                c.turn_count != null ? c.turn_count + (c.turn_count === 1 ? ' turn' : ' turns') : '',
+                c.tool_calls != null ? c.tool_calls + ' tools' : '',
+            ].filter(Boolean).join(' · ');
             html += `<a href="/sessions/${esc(c.id)}${src ? '?source=' + encodeURIComponent(src) : ''}" data-route
                 class="flex items-center gap-2.5 px-4 py-2 border-t border-zinc-50 dark:border-cc-line2 hover:bg-zinc-50 dark:hover:bg-cc-panel text-sm">
                 <span class="w-1.5 h-1.5 rounded-full shrink-0 ${subagentStatusDot(c.status)}"></span>

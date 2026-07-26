@@ -12,6 +12,9 @@ All notable changes to Command Center are documented here.
 - **Grok Build conversation replay** - surface auto `session_recap` summaries and background task start/complete events (terminal log preview).
 - **Grok Build tool map** - map newer tools (`update_goal`, plan mode, monitor, image tools, scheduler, MCP search).
 - **Grok Build session meta** - context window pct/used and non-off sandbox profile in the session detail line.
+- **Grok Build subagent usage fold** - parent token totals sum direct child session usage (Grok does not fold bills into the parent the way Claude logs per-message usage). Fingerprint includes child `updates.jsonl` so nested-only activity reindexes.
+- **Grok Build search text** - FTS also indexes background-task descriptions and `update_goal` progress lines.
+- **Tool labels** - `UpdateGoal`, plan mode, image tools, and ask-user questions get proper categories and describe strings.
 
 ## [1.7.0] - 2026-07-15
 

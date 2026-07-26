@@ -59,8 +59,8 @@ class GrokSessions {
 	}
 
 	/**
-	 * Fingerprint = (updates.jsonl mtime, updates.jsonl size). New turns append
-	 * to updates.jsonl; summary.json may lag slightly but size catches growth.
+	 * Fingerprint = mtime + size of updates.jsonl, folded with direct child
+	 * subagent update files so nested-only activity triggers re-extraction.
 	 */
 	public static function fingerprint( array $session ): ?array {
 		$file = self::findSessionFile( $session['id'] ?? '' );
@@ -68,9 +68,25 @@ class GrokSessions {
 			return null;
 		}
 		clearstatcache( true, $file );
+		$mtime = (int) ( @filemtime( $file ) ?: 0 );
+		$size  = (int) ( @filesize( $file ) ?: 0 );
+
+		$dir = self::findSessionDir( $session['id'] ?? '', $session['project'] ?? null );
+		if ( $dir ) {
+			foreach ( self::childSessionIds( $dir ) as $childId ) {
+				$childFile = self::findSessionFile( $childId );
+				if ( ! $childFile || ! is_file( $childFile ) ) {
+					continue;
+				}
+				clearstatcache( true, $childFile );
+				$mtime = max( $mtime, (int) ( @filemtime( $childFile ) ?: 0 ) );
+				$size += (int) ( @filesize( $childFile ) ?: 0 );
+			}
+		}
+
 		return [
-			'mtime' => (int) ( @filemtime( $file ) ?: 0 ),
-			'size'  => (int) ( @filesize( $file ) ?: 0 ),
+			'mtime' => $mtime,
+			'size'  => $size,
 		];
 	}
 
@@ -78,8 +94,9 @@ class GrokSessions {
 	 * Token usage for the heatmap / usage views.
 	 *
 	 * Prefer the last turn_completed.usage block in updates.jsonl (API-reported
-	 * input/output/cache, cumulative for the session). That is the measured path
-	 * used by SessionRegistry::usageType('grok').
+	 * input/output/cache, cumulative for that agent session). Grok does not
+	 * reliably fold subagent bills into the parent, so parent usage also sums
+	 * each direct child's measured (or fallback) usage - same idea as Claude.
 	 *
 	 * Fallback when no turn_completed usage exists (mid-turn / older logs):
 	 * signals.json context tokens for input, output estimated from streamed
@@ -91,13 +108,76 @@ class GrokSessions {
 			return null;
 		}
 
-		$file = $dir . '/updates.jsonl';
+		$own = self::usageForSessionDir( $dir );
+		$childIds = self::childSessionIds( $dir );
+		if ( ! $childIds ) {
+			return $own;
+		}
+
+		$totals = $own ?? [
+			'input'          => 0,
+			'output'         => 0,
+			'cache_read'     => 0,
+			'cache_creation' => 0,
+		];
+		$found = $own !== null;
+
+		foreach ( $childIds as $childId ) {
+			$childDir = self::findSessionDir( $childId );
+			if ( ! $childDir ) {
+				continue;
+			}
+			// Own file only - do not recurse. Nested forks also appear under
+			// the original parent's subagents/ when Grok registers them.
+			$childUsage = self::usageForSessionDir( $childDir );
+			if ( $childUsage === null ) {
+				continue;
+			}
+			$found = true;
+			$totals['input']          += $childUsage['input'];
+			$totals['output']         += $childUsage['output'];
+			$totals['cache_read']     += $childUsage['cache_read'];
+			$totals['cache_creation'] += $childUsage['cache_creation'];
+		}
+
+		return $found ? $totals : null;
+	}
+
+	/**
+	 * Measured or estimated usage for a single session directory (no children).
+	 *
+	 * @return array{input:int,output:int,cache_read:int,cache_creation:int}|null
+	 */
+	private static function usageForSessionDir( string $dir ): ?array {
+		$file     = $dir . '/updates.jsonl';
 		$measured = self::usageFromTurnCompleted( $file );
 		if ( $measured !== null ) {
 			return $measured;
 		}
-
 		return self::usageEstimatedFallback( $dir, $file );
+	}
+
+	/**
+	 * Child session ids registered under sessionDir/subagents/* /meta.json.
+	 *
+	 * @return list<string>
+	 */
+	private static function childSessionIds( string $sessionDir ): array {
+		$subRoot = $sessionDir . '/subagents';
+		if ( ! is_dir( $subRoot ) ) {
+			return [];
+		}
+		$ids = [];
+		foreach ( glob( $subRoot . '/*', GLOB_ONLYDIR ) ?: [] as $childDir ) {
+			$meta = self::readJson( $childDir . '/meta.json' );
+			$id   = is_array( $meta )
+				? (string) ( $meta['child_session_id'] ?? $meta['subagent_id'] ?? basename( $childDir ) )
+				: basename( $childDir );
+			if ( self::isValidSessionId( $id ) ) {
+				$ids[] = $id;
+			}
+		}
+		return $ids;
 	}
 
 	/**
@@ -319,8 +399,35 @@ class GrokSessions {
 				}
 				continue;
 			}
-			// Boundary: tool calls / thoughts end a text run.
-			if ( $type === 'tool_call' || $type === 'tool_call_update' || $type === 'agent_thought_chunk' ) {
+			// Background task descriptions / commands are often the only trace
+			// of long shell work (logs live under terminal/).
+			if ( $type === 'task_backgrounded' ) {
+				$flushUser();
+				$flushAgent();
+				$desc = trim( (string) ( $update['description'] ?? '' ) );
+				$cmd  = trim( (string) ( $update['command'] ?? '' ) );
+				$blob = $desc !== '' ? $desc : $cmd;
+				if ( $blob !== '' ) {
+					$parts[] = mb_substr( $blob, 0, $maxChars );
+				}
+				continue;
+			}
+			// Goal updates carry short progress lines worth indexing.
+			if ( $type === 'tool_call' ) {
+				$flushUser();
+				$flushAgent();
+				$toolName = (string) ( $update['_meta']['x.ai/tool']['name'] ?? $update['title'] ?? '' );
+				if ( strtolower( $toolName ) === 'update_goal' ) {
+					$raw = $update['rawInput'] ?? ( $update['_meta']['x.ai/tool']['input'] ?? [] );
+					$msg = is_array( $raw ) ? trim( (string) ( $raw['message'] ?? '' ) ) : '';
+					if ( $msg !== '' ) {
+						$parts[] = mb_substr( $msg, 0, $maxChars );
+					}
+				}
+				continue;
+			}
+			// Boundary: tool updates / thoughts end a text run.
+			if ( $type === 'tool_call_update' || $type === 'agent_thought_chunk' ) {
 				$flushUser();
 				$flushAgent();
 			}
@@ -1130,6 +1237,7 @@ class GrokSessions {
 				'subagent_type' => (string) ( $meta['subagent_type'] ?? '' ),
 				'duration_ms'   => isset( $meta['duration_ms'] ) ? (int) $meta['duration_ms'] : null,
 				'tool_calls'    => isset( $meta['tool_calls'] ) ? (int) $meta['tool_calls'] : null,
+				'turn_count'    => isset( $meta['turns'] ) ? (int) $meta['turns'] : null,
 				'timestamp'     => $ts,
 				'timestamp_s'   => (int) floor( $ts / 1000 ),
 				'model'         => (string) ( $meta['effective_model_id'] ?? '' ),
@@ -1297,7 +1405,7 @@ class GrokSessions {
 			'open_page'                      => 'WebFetch',
 			'open_page_with_find'            => 'WebFetch',
 			'todo_write'                     => 'TodoWrite',
-			'update_goal'                    => 'TodoWrite',
+			'update_goal'                    => 'UpdateGoal',
 			'spawn_subagent'                 => 'Task',
 			'get_command_or_subagent_output' => 'Task',
 			'kill_command_or_subagent'       => 'Task',
