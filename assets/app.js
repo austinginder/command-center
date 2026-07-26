@@ -15,6 +15,7 @@ const state = {
 const routes = [
     { pattern: /^\/$/, view: renderDashboard },
     { pattern: /^\/usage$/, view: renderUsageView },
+    { pattern: /^\/changelog$/, view: renderChangelogView },
     { pattern: /^\/sessions$/, view: () => navigate('/', true) },
     { pattern: /^\/sessions\/([A-Za-z0-9_-]+)$/, view: renderSessionView },
 ];
@@ -462,6 +463,14 @@ function ensureUpdatePanelWired() {
         btn.setAttribute('aria-expanded', 'false');
     });
 
+    // In-app changelog: close panel, let data-route navigate.
+    document.getElementById('update-changelog-link')?.addEventListener('click', () => {
+        if (panel) {
+            panel.classList.add('hidden');
+            btn.setAttribute('aria-expanded', 'false');
+        }
+    });
+
     apply?.addEventListener('click', async () => {
         await applyUpdate();
     });
@@ -567,8 +576,12 @@ function renderUpdatePanel() {
         `<div class="flex justify-between gap-3"><span class="text-zinc-400 dark:text-cc-dim shrink-0">${esc(k)}</span><span class="text-right text-zinc-700 dark:text-cc-soft break-all">${esc(v)}</span></div>`
     ).join('');
 
-    if (link && d.changelog) {
-        link.href = d.changelog;
+    // Always prefer the in-app changelog page over the remote GitHub URL.
+    if (link) {
+        link.href = '/changelog';
+        link.setAttribute('data-route', '');
+        link.removeAttribute('target');
+        link.removeAttribute('rel');
     }
     if (msg && !msg.dataset.sticky) {
         msg.classList.add('hidden');
@@ -1785,6 +1798,64 @@ function renderDashboard() {
         searchInput.focus();
         if (initialQuery && initialDeep) doDeepSearch();
     })();
+}
+
+// ─── View: Changelog ─────────────────────────────────────────
+async function renderChangelogView() {
+    const app = document.getElementById('app');
+    state.activeRoute = 'changelog';
+    app.innerHTML = `
+        <div class="space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-3">
+                    <a href="/" data-route class="text-zinc-400 dark:text-cc-dim hover:text-zinc-600 dark:hover:text-cc-mut p-1 -ml-1 rounded transition-colors" title="Back">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                    </a>
+                    <h1 class="text-sm font-mono font-bold tracking-[0.2em] text-zinc-900 dark:text-cc-bright">CHANGELOG</h1>
+                    <span id="changelog-version" class="text-[11px] font-mono text-zinc-400 dark:text-cc-dim"></span>
+                </div>
+                <a href="https://github.com/austinginder/command-center/blob/main/CHANGELOG.md" target="_blank" rel="noopener"
+                    class="text-[11px] font-mono text-zinc-400 dark:text-cc-dim hover:text-zinc-600 dark:hover:text-cc-mut">View on GitHub</a>
+            </div>
+            <div id="changelog-body" class="bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm px-5 py-5 sm:px-7 sm:py-6">
+                <div class="text-xs font-mono text-zinc-400 dark:text-cc-dim">loading…</div>
+            </div>
+        </div>`;
+
+    const body = document.getElementById('changelog-body');
+    const verEl = document.getElementById('changelog-version');
+    try {
+        const res = await fetch('/api/changelog');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        if (verEl && data.version) verEl.textContent = 'v' + data.version;
+        const md = data.markdown || '';
+        body.innerHTML = `<div class="changelog-md md-body text-sm text-zinc-700 dark:text-cc-soft leading-relaxed">${marked.parse(md, { breaks: true })}</div>`;
+        // Light heading polish so version sections scan like the repo file.
+        body.querySelectorAll('h2').forEach(h => {
+            h.className = 'mt-8 first:mt-0 mb-3 text-base font-semibold text-zinc-900 dark:text-cc-bright border-b border-zinc-100 dark:border-cc-line2 pb-2';
+        });
+        body.querySelectorAll('h3').forEach(h => {
+            h.className = 'mt-5 mb-1.5 text-xs font-mono font-semibold uppercase tracking-widest text-zinc-400 dark:text-cc-dim';
+        });
+        body.querySelectorAll('ul').forEach(u => {
+            u.classList.add('list-disc', 'pl-5', 'space-y-1.5', 'my-2');
+        });
+        body.querySelectorAll('li').forEach(li => {
+            li.classList.add('text-sm', 'leading-relaxed');
+        });
+        body.querySelectorAll('strong').forEach(s => {
+            s.classList.add('text-zinc-900', 'dark:text-cc-bright', 'font-semibold');
+        });
+        body.querySelectorAll('code').forEach(c => {
+            c.className = 'text-[12px] font-mono px-1 py-0.5 rounded bg-zinc-100 dark:bg-cc-panel text-zinc-700 dark:text-cc-soft';
+        });
+        body.querySelectorAll('p').forEach(p => {
+            p.classList.add('my-2', 'text-sm', 'leading-relaxed', 'text-zinc-600', 'dark:text-cc-mut');
+        });
+    } catch (err) {
+        body.innerHTML = `<div class="text-xs font-mono text-red-500">failed to load changelog</div>`;
+    }
 }
 
 // ─── View: Token Usage ───────────────────────────────────────

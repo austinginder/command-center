@@ -101,7 +101,7 @@ $assetVer = function ( string $path ): string {
                     <div id="update-panel-body" class="text-[11px] font-mono space-y-1 text-zinc-500 dark:text-cc-dim">loading…</div>
                     <div class="flex items-center gap-2 pt-1">
                         <button type="button" id="update-apply-btn" class="hidden px-2.5 py-1 text-[11px] font-medium rounded-lg bg-zinc-900 text-white dark:bg-cc-ink dark:text-cc-bg disabled:opacity-40">Update now</button>
-                        <a id="update-changelog-link" href="https://github.com/austinginder/command-center/blob/main/CHANGELOG.md" target="_blank" rel="noopener" class="text-[11px] font-mono text-zinc-400 dark:text-cc-dim hover:text-zinc-600 dark:hover:text-cc-mut">Changelog</a>
+                        <a id="update-changelog-link" href="/changelog" data-route class="text-[11px] font-mono text-zinc-400 dark:text-cc-dim hover:text-zinc-600 dark:hover:text-cc-mut">Changelog</a>
                     </div>
                     <div id="update-panel-msg" class="hidden text-[11px] font-mono text-zinc-500 dark:text-cc-dim"></div>
                 </div>

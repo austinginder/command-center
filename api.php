@@ -19,6 +19,30 @@ if ( $method === 'GET' && $path === '/version' ) {
 	exit;
 }
 
+// GET /api/changelog - local CHANGELOG.md for the in-app changelog page
+if ( $method === 'GET' && $path === '/changelog' ) {
+	$file = BASE_DIR . '/CHANGELOG.md';
+	if ( ! is_readable( $file ) ) {
+		http_response_code( 404 );
+		echo json_encode( [ 'error' => 'CHANGELOG.md not found' ] );
+		exit;
+	}
+	$md = (string) file_get_contents( $file );
+	// Drop the leading H1 title - the page header supplies it.
+	$md = preg_replace( '/^#\s+Changelog\s*\n+/i', '', $md, 1 );
+	$version = null;
+	try {
+		$version = Updater::localManifest()['version'] ?? null;
+	} catch ( \Throwable $e ) {
+		// non-fatal
+	}
+	echo json_encode( [
+		'markdown' => $md,
+		'version'  => $version,
+	] );
+	exit;
+}
+
 // GET /api/update/check - status (+ daily cache). ?force=1 bypasses cache.
 if ( $method === 'GET' && $path === '/update/check' ) {
 	$force = isset( $_GET['force'] ) && ( $_GET['force'] === '1' || $_GET['force'] === 'true' );
