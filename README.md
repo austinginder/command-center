@@ -82,7 +82,19 @@ command-center update --check   # is a newer release available?
 command-center update           # update in place
 ```
 
-Both the UI and CLI compare the local `manifest.json` against the latest release manifest on GitHub (`main`). Git installs are updated with a fast-forward pull (they refuse if the working tree has local changes). Non-git installs download the release package (`command-center.zip` from the GitHub release) and copy it over the install, leaving `data/` untouched. Set `COMMAND_CENTER_UPDATE_CHECK=0` to disable remote checks.
+Both the UI and CLI compare the local `manifest.json` against the latest release manifest on GitHub (`main`). Git installs are updated with a fast-forward pull (they refuse if the working tree has local changes). Non-git installs download the release package (`command-center.zip` from the GitHub release) and copy it over the install, leaving `data/` untouched.
+
+| Env | Effect |
+|---|---|
+| `COMMAND_CENTER_UPDATE_CHECK=0` | Disable remote checks |
+| `COMMAND_CENTER_UPDATE_SIMULATE=1.8.0` | Pretend remote latest is `1.8.0` (UI/CLI show Update; apply is a dry-run) |
+| `COMMAND_CENTER_UPDATE_SIMULATE=1` | Pretend remote is local patch+1 (e.g. `1.7.0` → `1.7.1`) |
+
+With Cove you can set env on the site, or for a one-shot CLI check:
+
+```bash
+COMMAND_CENTER_UPDATE_SIMULATE=1.8.0 command-center update --check
+```
 
 ## API
 

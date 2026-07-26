@@ -8,6 +8,7 @@ All notable changes to Command Center are documented here.
 
 - **Web UI self-updater** - nav version chip checks GitHub daily on dashboard load (24h server cache). Panel shows installed vs latest; **Update now** runs the same path as the CLI (git pull or release zip). `GET /api/version`, `GET /api/update/check`, `POST /api/update`. Shared `app/Updater.php` powers CLI and UI. `COMMAND_CENTER_UPDATE_CHECK=0` disables remote checks. Release packages should use `command-center.zip` on the GitHub release asset (see manifest `download_url`).
 - **In-app changelog** - `/changelog` renders local `CHANGELOG.md` (linked from the version panel). `GET /api/changelog`.
+- **Update simulation** - `COMMAND_CENTER_UPDATE_SIMULATE=1.8.0` (or `=1` for patch+1) fakes a newer remote for local UI/CLI testing; apply is a dry-run.
 
 ### Improved
 

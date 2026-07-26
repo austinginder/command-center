@@ -561,11 +561,14 @@ function renderUpdatePanel() {
     if (d.update_available) {
         rows.push(['Status', d.requires_php_ok === false
             ? 'needs PHP ' + (d.requires_php || '?') + '+'
-            : (d.dirty ? 'working tree dirty' : 'update available')]);
+            : (d.dirty ? 'working tree dirty' : (d.simulated ? 'update available (simulated)' : 'update available'))]);
     } else if (d.remote_error) {
         rows.push(['Status', d.remote_error]);
     } else {
         rows.push(['Status', 'up to date']);
+    }
+    if (d.simulated) {
+        rows.push(['Dev', 'COMMAND_CENTER_UPDATE_SIMULATE']);
     }
     if (d.checked_at) {
         const t = new Date(d.checked_at * 1000);

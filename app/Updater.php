@@ -15,6 +15,11 @@
  *
  * Network checks are cached under data/update-check.json for CACHE_TTL seconds
  * (default 1 day). COMMAND_CENTER_UPDATE_CHECK=0 disables remote fetches.
+ *
+ * Local dev simulation (no real release needed):
+ *   COMMAND_CENTER_UPDATE_SIMULATE=1.8.0   pretend remote latest is 1.8.0
+ *   COMMAND_CENTER_UPDATE_SIMULATE=1       bump local patch (1.7.0 → 1.7.1)
+ * Apply under simulation is a dry-run (nothing installed; useful for UI testing).
  */
 class Updater {
 
@@ -61,7 +66,8 @@ class Updater {
 	 *   homepage:?string,
 	 *   checked_at:int,
 	 *   cached:bool,
-	 *   remote_error:?string
+	 *   remote_error:?string,
+	 *   simulated:bool
 	 * }
 	 */
 	public static function status( bool $forceRefresh = false ): array {
@@ -84,45 +90,67 @@ class Updater {
 			'checked_at'       => time(),
 			'cached'           => false,
 			'remote_error'     => null,
+			'simulated'        => false,
 		];
 
-		if ( ! self::checksEnabled() ) {
+		// Dev simulate can run without network (still useful when checks are off).
+		$simulate = self::simulateVersion( $current );
+
+		if ( ! self::checksEnabled() && $simulate === null ) {
 			$base['remote_error'] = 'Update checks disabled (COMMAND_CENTER_UPDATE_CHECK=0).';
 			return $base;
 		}
 
-		$remoteResult = self::remoteManifest( $forceRefresh );
-		if ( ! empty( $remoteResult['error'] ) ) {
-			$base['remote_error'] = (string) $remoteResult['error'];
-			$base['checked_at']   = (int) ( $remoteResult['checked_at'] ?? time() );
-			$base['cached']       = ! empty( $remoteResult['cached'] );
-			// Still surface last-known remote if cache had a body.
-			if ( empty( $remoteResult['manifest'] ) || ! is_array( $remoteResult['manifest'] ) ) {
+		if ( self::checksEnabled() ) {
+			$remoteResult = self::remoteManifest( $forceRefresh );
+			if ( ! empty( $remoteResult['error'] ) ) {
+				$base['remote_error'] = (string) $remoteResult['error'];
+				$base['checked_at']   = (int) ( $remoteResult['checked_at'] ?? time() );
+				$base['cached']       = ! empty( $remoteResult['cached'] );
+				// Still surface last-known remote if cache had a body.
+				if ( ( empty( $remoteResult['manifest'] ) || ! is_array( $remoteResult['manifest'] ) )
+					&& $simulate === null
+				) {
+					return $base;
+				}
+			}
+
+			$remote = $remoteResult['manifest'] ?? null;
+			if ( is_array( $remote ) && ! empty( $remote['version'] ) ) {
+				$latest = (string) $remote['version'];
+				$phpReq = isset( $remote['requires_php'] ) ? (string) $remote['requires_php'] : null;
+				$phpOk  = $phpReq === null || $phpReq === '' || version_compare( PHP_VERSION, $phpReq, '>=' );
+
+				$base['latest']           = $latest;
+				$base['update_available'] = version_compare( $latest, $current, '>' );
+				$base['requires_php']     = $phpReq;
+				$base['requires_php_ok']  = $phpOk;
+				$base['download_url']     = isset( $remote['download_url'] ) ? (string) $remote['download_url'] : null;
+				$base['changelog']        = $remote['changelog'] ?? $base['changelog'];
+				$base['homepage']         = $remote['homepage'] ?? $base['homepage'];
+				$base['checked_at']       = (int) ( $remoteResult['checked_at'] ?? time() );
+				$base['cached']           = ! empty( $remoteResult['cached'] );
+			} elseif ( $simulate === null ) {
+				if ( empty( $base['remote_error'] ) ) {
+					$base['remote_error'] = 'Could not read remote manifest.';
+				}
 				return $base;
 			}
 		}
 
-		$remote = $remoteResult['manifest'] ?? null;
-		if ( ! is_array( $remote ) || empty( $remote['version'] ) ) {
+		// Override remote latest for local UI/CLI testing.
+		if ( $simulate !== null ) {
+			$base['latest']           = $simulate;
+			$base['update_available'] = version_compare( $simulate, $current, '>' );
+			$base['simulated']        = true;
+			$base['requires_php_ok']  = true;
+			// Simulated apply is a dry-run - dirty git tree should not block UI testing.
+			$base['dirty'] = false;
 			if ( empty( $base['remote_error'] ) ) {
-				$base['remote_error'] = 'Could not read remote manifest.';
+				// Keep real remote_error if network failed, but still show simulated update.
 			}
-			return $base;
+			$base['remote_error'] = null;
 		}
-
-		$latest = (string) $remote['version'];
-		$phpReq = isset( $remote['requires_php'] ) ? (string) $remote['requires_php'] : null;
-		$phpOk  = $phpReq === null || $phpReq === '' || version_compare( PHP_VERSION, $phpReq, '>=' );
-
-		$base['latest']           = $latest;
-		$base['update_available'] = version_compare( $latest, $current, '>' );
-		$base['requires_php']     = $phpReq;
-		$base['requires_php_ok']  = $phpOk;
-		$base['download_url']     = isset( $remote['download_url'] ) ? (string) $remote['download_url'] : null;
-		$base['changelog']        = $remote['changelog'] ?? $base['changelog'];
-		$base['homepage']         = $remote['homepage'] ?? $base['homepage'];
-		$base['checked_at']       = (int) ( $remoteResult['checked_at'] ?? time() );
-		$base['cached']           = ! empty( $remoteResult['cached'] );
 
 		return $base;
 	}
@@ -157,6 +185,17 @@ class Updater {
 		if ( empty( $status['requires_php_ok'] ) ) {
 			$req = $status['requires_php'] ?? '?';
 			return self::fail( "v{$to} requires PHP {$req}+ (you have " . PHP_VERSION . ').' );
+		}
+
+		// Dev flag: exercise the UI/CLI flow without pulling or unpacking.
+		if ( ! empty( $status['simulated'] ) ) {
+			return [
+				'ok'      => true,
+				'from'    => $from,
+				'to'      => $to,
+				'method'  => 'simulate',
+				'message' => "Simulated update v{$from} → v{$to} (COMMAND_CENTER_UPDATE_SIMULATE; nothing installed).",
+			];
 		}
 
 		if ( $status['install_kind'] === 'git' ) {
@@ -207,6 +246,40 @@ class Updater {
 		}
 		$v = strtolower( trim( (string) $env ) );
 		return ! in_array( $v, [ '0', 'false', 'off', 'no' ], true );
+	}
+
+	/**
+	 * Parse COMMAND_CENTER_UPDATE_SIMULATE.
+	 *
+	 * @return string|null Fake remote version, or null when simulation is off.
+	 */
+	public static function simulateVersion( string $current ): ?string {
+		$env = getenv( 'COMMAND_CENTER_UPDATE_SIMULATE' );
+		if ( $env === false || $env === '' ) {
+			return null;
+		}
+		$v = trim( (string) $env );
+		$lower = strtolower( $v );
+		if ( in_array( $lower, [ '0', 'false', 'off', 'no' ], true ) ) {
+			return null;
+		}
+		// Bare truthy → bump patch of current (1.7.0 → 1.7.1).
+		if ( in_array( $lower, [ '1', 'true', 'yes', 'on' ], true ) ) {
+			return self::bumpPatch( $current );
+		}
+		// Explicit version string.
+		if ( preg_match( '/^\d+\.\d+\.\d+/', $v ) ) {
+			return $v;
+		}
+		return null;
+	}
+
+	/** 1.7.0 → 1.7.1 (non-semver tails fall back to current.1). */
+	private static function bumpPatch( string $version ): string {
+		if ( preg_match( '/^(\d+)\.(\d+)\.(\d+)/', $version, $m ) ) {
+			return $m[1] . '.' . $m[2] . '.' . ( (int) $m[3] + 1 );
+		}
+		return $version . '.1';
 	}
 
 	/**
