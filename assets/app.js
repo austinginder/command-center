@@ -2764,8 +2764,7 @@ body {
 }
 .acts button:hover { color: var(--mut); border-color: var(--line3); }
 main { max-width: 50rem; margin: 0 auto; padding: 2rem 1.25rem 3rem; }
-h1 { font-size: 1.15rem; font-weight: 600; color: var(--bright); margin: 0 0 .5rem; line-height: 1.4; overflow-wrap: break-word; }
-.meta { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-bottom: 1.5rem; }
+.meta { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-bottom: 1rem; }
 .chip {
     display: inline-flex; align-items: center; gap: .35rem;
     font-size: .68rem; font-weight: 500; padding: .15rem .5rem;
@@ -3036,7 +3035,6 @@ if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matc
     </div>
 </header>
 <main>
-    <h1>${esc(title)}</h1>
     <div class="meta">
         ${src ? `<span class="chip"><span class="dot" style="background:${dotHex}"></span>${esc(src)}</span>` : ''}
         ${metaLine ? `<span class="metaline">${esc(metaLine)}</span>` : ''}
