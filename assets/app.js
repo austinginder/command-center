@@ -2832,6 +2832,14 @@ details.out { margin: .15rem 0 .15rem 1.4rem; }
     width: 1rem; height: 1rem; border-radius: 999px; background: rgba(16,185,129,.15); flex-shrink: 0;
 }
 .sum { font-size: .72rem; font-style: italic; color: var(--mut); padding: .3rem 0 .5rem; border-bottom: 1px solid var(--line2); margin-bottom: .8rem; }
+details.ctx { margin: .8rem 0 .8rem .25rem; border-left: 1px solid var(--line); padding-left: .8rem; }
+.ctx-body {
+    margin-top: .4rem; font-size: .75rem; color: var(--mut);
+    max-height: 24rem; overflow-y: auto;
+    background: var(--panel); border: 1px solid var(--line); border-radius: .4rem; padding: .6rem .75rem;
+}
+body.chat details.tg, body.chat details.out, body.chat details.ctx, body.chat .done, body.chat .sum { display: none; }
+body.chat #expand-btn { display: none; }
 .md p { margin: .3rem 0; }
 .md p:first-child { margin-top: 0; }
 .md p:last-child { margin-bottom: 0; }
@@ -2902,12 +2910,51 @@ function exportToolRow(ev) {
     return `<div class="tr"><span class="tb tb-${cat}">${esc(ev.tool || '')}</span>${body}</div>`;
 }
 
+/**
+ * Injected context inside user messages (skill bodies, system reminders,
+ * command logs) is not the human talking. Label it so the export can fold
+ * it away instead of burying the real conversation.
+ */
+function exportContextLabel(text) {
+    if (/^Base directory for this skill:/.test(text)) return 'skill instructions';
+    if (/^<command-message>/.test(text)) return 'command message';
+    if (/^Caveat: The messages below/.test(text)) return 'local command log';
+    if (/^<local-command-stdout>/.test(text)) return 'local command output';
+    if (/^<task-notification>/.test(text)) return 'task notification';
+    return null;
+}
+
+function exportContextBlock(label, text) {
+    return `<details class="ctx"><summary>${esc(label)} (${esc(formatBytes(text.length))})</summary><div class="ctx-body md">${exportMd(text)}</div></details>`;
+}
+
+/** Pull <system-reminder> blocks out of a user message, keep the human text. */
+function exportSplitReminders(text) {
+    const reminders = [];
+    const rest = String(text)
+        .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, m => {
+            reminders.push(m);
+            return '';
+        })
+        .trim();
+    return { rest, reminders };
+}
+
 function exportUserMessage(text) {
     const m = text.match(/<command-name>\s*(\/\S+)\s*<\/command-name>\s*<command-args>([\s\S]*?)<\/command-args>/);
     if (m) {
         return `<div class="ucmd"><span class="you">you</span><code>${esc(m[1])} ${esc(m[2].trim())}</code></div>`;
     }
-    return `<div class="u"><span class="you">you</span><div class="md">${exportMd(text)}</div></div>`;
+    const { rest, reminders } = exportSplitReminders(text);
+    let html = '';
+    if (rest) {
+        const ctxLabel = exportContextLabel(rest);
+        html += ctxLabel
+            ? exportContextBlock(ctxLabel, rest)
+            : `<div class="u"><span class="you">you</span><div class="md">${exportMd(rest)}</div></div>`;
+    }
+    reminders.forEach(r => { html += exportContextBlock('system reminder', r); });
+    return html;
 }
 
 /** Static equivalent of renderEvents(): tool calls buffer into collapsed groups. */
@@ -2976,13 +3023,14 @@ if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matc
 }
 </script>
 </head>
-<body>
+<body class="chat">
 <header class="hdr">
     <div class="brand">
         ${EXPORT_LOGO}
         <span class="brand-txt"><span class="b1">COMMAND CENTER</span><span class="b2">SESSION EXPORT</span></span>
     </div>
     <div class="acts">
+        <button type="button" id="mode-btn" title="Show tool calls and injected context">full detail</button>
         <button type="button" id="expand-btn">expand all</button>
         <button type="button" id="theme-btn" title="Toggle light/dark">◐</button>
     </div>
@@ -2999,6 +3047,11 @@ if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matc
 <script>
 document.getElementById('theme-btn').addEventListener('click', function () {
     document.documentElement.classList.toggle('light');
+});
+document.getElementById('mode-btn').addEventListener('click', function () {
+    var chat = document.body.classList.toggle('chat');
+    this.textContent = chat ? 'full detail' : 'chat only';
+    this.title = chat ? 'Show tool calls and injected context' : 'Hide tool calls and injected context';
 });
 var allOpen = false;
 document.getElementById('expand-btn').addEventListener('click', function () {
