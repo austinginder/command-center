@@ -2969,6 +2969,12 @@ function buildExportHtml({ session, title, metaLine, events }) {
 <meta name="generator" content="Command Center">
 <title>${esc(title)} · Command Center</title>
 <style>${EXPORT_CSS}</style>
+<script>
+// Honor the reader's system preference before first paint (toggle overrides).
+if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+    document.documentElement.classList.add('light');
+}
+</script>
 </head>
 <body>
 <header class="hdr">
