@@ -371,6 +371,7 @@ function resumeCommand(source, project, sessionId, environmentId, display) {
 
 const ICON_COPY = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>';
 const ICON_CHECK = '<svg class="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>';
+const ICON_DOWNLOAD = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 4v12m0 0l-4-4m4 4l4-4"/></svg>';
 
 function copyWithFlash(btn, text, iconSel) {
     navigator.clipboard.writeText(text).then(() => {
@@ -2217,9 +2218,14 @@ function renderSessionView(sessionId) {
                         </div>
                     </div>
                 </div>
-                <button id="session-copy-resume-btn" class="hidden shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-zinc-200 dark:border-cc-line3 bg-white dark:bg-cc-card text-xs font-medium text-zinc-600 dark:text-cc-soft hover:border-zinc-400 dark:hover:border-[#2a3830] transition-colors" title="Copy CLI resume command">
-                    <span class="resume-icon">${ICON_COPY}</span> Copy resume
-                </button>
+                <div class="shrink-0 flex items-center gap-2">
+                    <button id="session-export-btn" class="hidden inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-zinc-200 dark:border-cc-line3 bg-white dark:bg-cc-card text-xs font-medium text-zinc-600 dark:text-cc-soft hover:border-zinc-400 dark:hover:border-[#2a3830] transition-colors" title="Download standalone HTML export">
+                        <span class="export-icon">${ICON_DOWNLOAD}</span> Export
+                    </button>
+                    <button id="session-copy-resume-btn" class="hidden inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-zinc-200 dark:border-cc-line3 bg-white dark:bg-cc-card text-xs font-medium text-zinc-600 dark:text-cc-soft hover:border-zinc-400 dark:hover:border-[#2a3830] transition-colors" title="Copy CLI resume command">
+                        <span class="resume-icon">${ICON_COPY}</span> Copy resume
+                    </button>
+                </div>
             </div>
             <div id="session-children" class="hidden bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm overflow-hidden"></div>
             <div id="session-log" class="bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm text-sm overflow-hidden">
@@ -2345,6 +2351,12 @@ function renderSessionView(sessionId) {
                     a.textContent = 'view parent';
                     wrap.appendChild(a);
                 }
+            }
+
+            const exportBtn = document.getElementById('session-export-btn');
+            if (exportBtn) {
+                exportBtn.classList.remove('hidden');
+                exportBtn.addEventListener('click', () => exportSessionHtml(exportBtn, sessionId, s));
             }
 
             const cmd = resumeCommand(s.source, s.project, sessionId, s.environmentId, s.display);
@@ -2668,6 +2680,372 @@ function appendComplete(log, data) {
     div.appendChild(icon);
     div.appendChild(msg);
     log.appendChild(div);
+}
+
+// ─── Session Export (standalone HTML) ────────────────────────
+// Builds a fully self-contained .html snapshot of a conversation: markdown is
+// pre-rendered, all CSS is inline, no CDN or network dependencies. The file
+// opens fullscreen in any browser, so it is safe to share as an attachment.
+
+// Hex dots for source chips in the export (Tailwind classes do not exist there).
+const SOURCE_HEX = {
+    amp:         '#84cc16',
+    t3code:      '#a855f7',
+    opencode:    '#3b82f6',
+    claude:      '#10b981',
+    commandcode: '#06b6d4',
+    antigravity: '#f97316',
+    gemini:      '#0ea5e9',
+    kimi:        '#ec4899',
+    grok:        '#f59e0b',
+    codex:       '#14b8a6',
+};
+
+const EXPORT_LOGO = `<svg class="logo" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+    <circle cx="16" cy="16" r="14" stroke="currentColor" stroke-width="1.5"/>
+    <circle cx="16" cy="16" r="9" stroke="currentColor" stroke-width="1" opacity="0.35"/>
+    <circle cx="16" cy="16" r="4.5" stroke="currentColor" stroke-width="1" opacity="0.25"/>
+    <path d="M16 1v3M16 28v3M1 16h3M28 16h3" stroke="currentColor" stroke-width="1" opacity="0.5"/>
+    <g class="radar-sweep">
+        <path d="M16 16 L16 3 A13 13 0 0 1 24.36 6.04 Z" fill="#10b981" opacity="0.18"/>
+        <line x1="16" y1="16" x2="16" y2="3" stroke="#10b981" stroke-width="1.5"/>
+    </g>
+    <circle cx="16" cy="16" r="1.5" fill="currentColor"/>
+</svg>`;
+
+const EXPORT_CSS = `
+* { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+:root {
+    --bg: #0a0e0c; --card: #0c110e; --panel: #0e1411;
+    --line: #1f2a24; --line2: #1a231e; --line3: #24312a;
+    --ink: #e8ece9; --bright: #f2f6f3; --soft: #c9d2cc; --mut: #9aa59e; --dim: #5c665f;
+    --accent: #34d399; --accent2: #10b981;
+    --dot: rgba(255,255,255,.028);
+    --pre-bg: #0a0f0c; --pre-line: #1f2a24; --code-bg: #1a231e;
+}
+html.light {
+    --bg: #fafafa; --card: #ffffff; --panel: #f4f4f5;
+    --line: #e4e4e7; --line2: #f0f0f1; --line3: #d4d4d8;
+    --ink: #27272a; --bright: #18181b; --soft: #3f3f46; --mut: #71717a; --dim: #a1a1aa;
+    --accent: #059669; --accent2: #059669;
+    --dot: rgba(24,24,27,.05);
+    --pre-bg: #18181b; --pre-line: #27272a; --code-bg: #f4f4f5;
+}
+html { font-size: 16px; }
+body {
+    margin: 0; min-height: 100vh; color: var(--ink);
+    background: var(--bg);
+    background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px);
+    background-size: 24px 24px;
+    font-family: -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+    line-height: 1.55;
+}
+.hdr, .b1, .b2, .acts button, .chip, .metaline, .tb, .tl, .todos, summary,
+.done, .sum, .you, .ucmd code, .out-body, footer, code, pre {
+    font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+.hdr {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    padding: 0 1.25rem; height: 3.4rem;
+    border-bottom: 1px solid var(--line2);
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+.brand { display: flex; align-items: center; gap: .65rem; color: var(--bright); }
+.logo { width: 1.7rem; height: 1.7rem; flex-shrink: 0; }
+.brand-txt { display: flex; flex-direction: column; gap: .22rem; line-height: 1; }
+.b1 { font-size: .68rem; font-weight: 700; letter-spacing: .25em; }
+.b2 { font-size: .55rem; letter-spacing: .3em; color: var(--dim); }
+.acts { display: flex; align-items: center; gap: .5rem; }
+.acts button {
+    font-size: .68rem; color: var(--dim); background: var(--card);
+    border: 1px solid var(--line); border-radius: .5rem; padding: .3rem .6rem; cursor: pointer;
+}
+.acts button:hover { color: var(--mut); border-color: var(--line3); }
+main { max-width: 50rem; margin: 0 auto; padding: 2rem 1.25rem 3rem; }
+h1 { font-size: 1.15rem; font-weight: 600; color: var(--bright); margin: 0 0 .5rem; line-height: 1.4; overflow-wrap: break-word; }
+.meta { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-bottom: 1.5rem; }
+.chip {
+    display: inline-flex; align-items: center; gap: .35rem;
+    font-size: .68rem; font-weight: 500; padding: .15rem .5rem;
+    border: 1px solid var(--line3); border-radius: .3rem; color: var(--soft);
+}
+.dot { width: .45rem; height: .45rem; border-radius: 999px; }
+.metaline { font-size: .7rem; color: var(--dim); overflow-wrap: anywhere; }
+.log { background: var(--card); border: 1px solid var(--line); border-radius: .8rem; padding: 1.25rem 1.5rem; font-size: .85rem; }
+.none { text-align: center; color: var(--dim); font-size: .75rem; padding: 1.5rem 0; }
+footer { margin-top: 1.5rem; text-align: center; font-size: .68rem; color: var(--dim); }
+footer a { color: var(--accent2); text-decoration: none; }
+footer a:hover { text-decoration: underline; }
+.u { margin: 1.4rem 0 .6rem; background: var(--panel); border: 1px solid var(--line3); border-radius: .55rem; padding: .7rem .9rem; }
+.u:first-child, .ucmd:first-child { margin-top: 0; }
+.you {
+    display: inline-flex; padding: .1rem .4rem; border-radius: .25rem;
+    font-size: .62rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+    background: var(--line3); color: var(--soft); margin-bottom: .3rem;
+}
+.ucmd { margin: 1.4rem 0 .4rem; display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; }
+.ucmd .you { margin-bottom: 0; }
+.ucmd code { font-size: .72rem; background: rgba(139,92,246,.12); color: #a78bfa; padding: .15rem .45rem; border-radius: .3rem; }
+html.light .ucmd code { color: #7c3aed; }
+.a { border-left: 2px solid color-mix(in srgb, var(--accent2) 40%, transparent); padding-left: .9rem; margin: .7rem 0; }
+details.tg { margin: .55rem 0 .55rem .25rem; border-left: 1px solid var(--line); padding-left: .8rem; }
+summary { cursor: pointer; font-size: .7rem; color: var(--dim); user-select: none; list-style: none; }
+summary::-webkit-details-marker { display: none; }
+summary::before { content: '\\25B8 '; }
+details[open] > summary::before { content: '\\25BE '; }
+summary:hover { color: var(--mut); }
+.tr { display: flex; align-items: flex-start; gap: .5rem; padding: .18rem 0; font-size: .72rem; }
+.tb { display: inline-flex; flex-shrink: 0; padding: .1rem .45rem; border-radius: 4px; font-weight: 500; }
+.tb-shell { background: var(--line3); color: var(--bright); }
+.tb-file { background: rgba(59,130,246,.15); color: #60a5fa; }
+.tb-search { background: rgba(6,182,212,.15); color: #22d3ee; }
+.tb-agent { background: rgba(139,92,246,.15); color: #a78bfa; }
+.tb-web { background: rgba(245,158,11,.15); color: #fbbf24; }
+.tb-skill { background: rgba(236,72,153,.15); color: #f472b6; }
+.tb-misc, .tb-other { background: rgba(113,113,122,.15); color: var(--mut); }
+html.light .tb-file { color: #2563eb; }
+html.light .tb-search { color: #0891b2; }
+html.light .tb-agent { color: #7c3aed; }
+html.light .tb-web { color: #b45309; }
+html.light .tb-skill { color: #db2777; }
+.tl { color: var(--dim); overflow-wrap: anywhere; padding-top: .1rem; }
+.todos { font-size: .72rem; color: var(--mut); line-height: 1.6; }
+.todo { display: flex; gap: .4rem; align-items: baseline; }
+.td-done { color: var(--accent2); }
+.td-run { color: #60a5fa; }
+.td-open { color: var(--dim); }
+details.out { margin: .15rem 0 .15rem 1.4rem; }
+.out-body {
+    margin-top: .3rem; font-size: .72rem; color: var(--mut);
+    max-height: 22rem; overflow-y: auto;
+    background: var(--bg); border: 1px solid var(--line); border-radius: .4rem; padding: .5rem .6rem;
+}
+.done {
+    display: flex; align-items: center; gap: .5rem;
+    margin-top: .8rem; padding-top: .7rem; border-top: 1px solid var(--line2);
+    font-size: .7rem; color: var(--accent);
+}
+.done-ic {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1rem; height: 1rem; border-radius: 999px; background: rgba(16,185,129,.15); flex-shrink: 0;
+}
+.sum { font-size: .72rem; font-style: italic; color: var(--mut); padding: .3rem 0 .5rem; border-bottom: 1px solid var(--line2); margin-bottom: .8rem; }
+.md p { margin: .3rem 0; }
+.md p:first-child { margin-top: 0; }
+.md p:last-child { margin-bottom: 0; }
+.md h1, .md h2, .md h3, .md h4 { font-weight: 600; margin: .8rem 0 .3rem; color: var(--bright); font-size: 1.05em; }
+.md h1 { font-size: 1.15em; }
+.md h2 { font-size: 1.1em; }
+.md ul, .md ol { margin: .3rem 0; padding-left: 1.3rem; }
+.md li { margin: .15rem 0; }
+.md code { background: var(--code-bg); color: var(--ink); padding: .1rem .35rem; border-radius: 3px; font-size: .9em; }
+.md pre { background: var(--pre-bg); color: #e4e4e7; border: 1px solid var(--pre-line); border-radius: 6px; padding: .7rem .85rem; overflow-x: auto; margin: .5rem 0; font-size: .85em; line-height: 1.6; }
+.md pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+.md blockquote { border-left: 2px solid var(--line3); padding-left: .9rem; color: var(--mut); margin: .5rem 0; }
+.md a { color: #60a5fa; text-decoration: none; }
+.md a:hover { text-decoration: underline; }
+html.light .md a { color: #2563eb; }
+.md table { border-collapse: collapse; margin: .5rem 0; font-size: .9em; display: block; overflow-x: auto; }
+.md th, .md td { border: 1px solid var(--line3); padding: .25rem .6rem; text-align: left; }
+.md img { max-width: 100%; border-radius: 6px; }
+.md hr { border: none; border-top: 1px solid var(--line); margin: .8rem 0; }
+.md strong { font-weight: 600; color: var(--bright); }
+.radar-sweep { transform-box: view-box; transform-origin: 50% 50%; animation: radar-spin 5s linear infinite; }
+@keyframes radar-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .radar-sweep { animation: none; } }
+@media print { .hdr { position: static; } .acts { display: none; } }
+`;
+
+/** Fetch every conversation page for a session (the viewer only holds one). */
+async function fetchAllConversationEvents(sessionId, source) {
+    const PAGE = 1000;
+    const events = [];
+    let offset = 0;
+    let total = null;
+    do {
+        const params = new URLSearchParams({ limit: String(PAGE), offset: String(offset) });
+        if (source) params.set('source', source);
+        const r = await fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/conversation?' + params.toString());
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const data = await r.json();
+        const page = Array.isArray(data.events) ? data.events : [];
+        events.push(...page);
+        total = data.total != null ? data.total : events.length;
+        offset += page.length;
+        if (!page.length) break;
+    } while (offset < total);
+    return events;
+}
+
+function exportMd(text) {
+    try {
+        return marked.parse(String(text || ''), { breaks: true });
+    } catch (err) {
+        return '<pre>' + esc(String(text || '')) + '</pre>';
+    }
+}
+
+function exportToolRow(ev) {
+    const cat = TOOL_STYLES[ev.category] ? ev.category : 'other';
+    let body;
+    if (ev.tool === 'TodoWrite' && ev.todos) {
+        body = '<div class="todos">' + ev.todos.map(t => {
+            const icon = t.status === 'completed' ? '✓' : t.status === 'in_progress' ? '▶' : '○';
+            const cls = t.status === 'completed' ? 'td-done' : t.status === 'in_progress' ? 'td-run' : 'td-open';
+            return `<div class="todo"><span class="${cls}">${icon}</span> <span>${esc(t.text)}</span></div>`;
+        }).join('') + '</div>';
+    } else {
+        body = `<span class="tl">${esc(ev.label || '')}</span>`;
+    }
+    return `<div class="tr"><span class="tb tb-${cat}">${esc(ev.tool || '')}</span>${body}</div>`;
+}
+
+function exportUserMessage(text) {
+    const m = text.match(/<command-name>\s*(\/\S+)\s*<\/command-name>\s*<command-args>([\s\S]*?)<\/command-args>/);
+    if (m) {
+        return `<div class="ucmd"><span class="you">you</span><code>${esc(m[1])} ${esc(m[2].trim())}</code></div>`;
+    }
+    return `<div class="u"><span class="you">you</span><div class="md">${exportMd(text)}</div></div>`;
+}
+
+/** Static equivalent of renderEvents(): tool calls buffer into collapsed groups. */
+function buildExportEvents(events) {
+    let out = '';
+    let tools = [];
+    let toolNames = [];
+    const flush = () => {
+        if (!tools.length) return;
+        const unique = [...new Set(toolNames)];
+        out += `<details class="tg"><summary>${tools.length} tool call${tools.length > 1 ? 's' : ''} (${esc(unique.join(', '))})</summary>${tools.join('')}</details>`;
+        tools = [];
+        toolNames = [];
+    };
+    for (const ev of events) {
+        const type = ev && ev.type;
+        if (!type || type === 'init') continue;
+        if (type === 'tool_call') {
+            toolNames.push(ev.tool || '');
+            tools.push(exportToolRow(ev));
+        } else if (type === 'tool_result') {
+            const text = String(ev.preview || '').trim();
+            if (!text || text.length < 3) continue;
+            const row = `<details class="out"><summary>output (${esc(formatBytes(ev.length || text.length))})</summary><div class="out-body md">${exportMd(text)}</div></details>`;
+            if (tools.length) tools.push(row);
+            else out += row;
+        } else if (type === 'user_message') {
+            flush();
+            out += exportUserMessage(ev.text || '');
+        } else if (type === 'text') {
+            flush();
+            out += `<div class="a md">${exportMd(ev.text || '')}</div>`;
+        } else if (type === 'complete') {
+            flush();
+            const tokens = ev.usage ? usageSummary(ev.usage) : '';
+            const turns = ev.turns ? ev.turns + ' turns' : '';
+            const meta = [tokens, turns].filter(Boolean).join(' / ');
+            out += `<div class="done"><span class="done-ic">✓</span><span>Turn complete${meta ? ' - ' + esc(meta) : ''}</span></div>`;
+        } else if (type === 'summary' && ev.text) {
+            flush();
+            out += `<div class="sum"><strong>Summary:</strong> ${esc(ev.text)}</div>`;
+        }
+    }
+    flush();
+    return out;
+}
+
+function buildExportHtml({ session, title, metaLine, events }) {
+    const s = session || {};
+    const src = s.source || '';
+    const dotHex = SOURCE_HEX[src] || '#a1a1aa';
+    const exported = new Date().toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+    const body = buildExportEvents(events);
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="generator" content="Command Center">
+<title>${esc(title)} · Command Center</title>
+<style>${EXPORT_CSS}</style>
+</head>
+<body>
+<header class="hdr">
+    <div class="brand">
+        ${EXPORT_LOGO}
+        <span class="brand-txt"><span class="b1">COMMAND CENTER</span><span class="b2">SESSION EXPORT</span></span>
+    </div>
+    <div class="acts">
+        <button type="button" id="expand-btn">expand all</button>
+        <button type="button" id="theme-btn" title="Toggle light/dark">◐</button>
+    </div>
+</header>
+<main>
+    <h1>${esc(title)}</h1>
+    <div class="meta">
+        ${src ? `<span class="chip"><span class="dot" style="background:${dotHex}"></span>${esc(src)}</span>` : ''}
+        ${metaLine ? `<span class="metaline">${esc(metaLine)}</span>` : ''}
+    </div>
+    <div class="log">${body || '<div class="none">no conversation events</div>'}</div>
+    <footer>Exported ${esc(exported)} · <a href="https://github.com/austinginder/command-center" rel="noopener">Command Center</a>${s.id ? ' · session ' + esc(s.id) : ''}</footer>
+</main>
+<script>
+document.getElementById('theme-btn').addEventListener('click', function () {
+    document.documentElement.classList.toggle('light');
+});
+var allOpen = false;
+document.getElementById('expand-btn').addEventListener('click', function () {
+    allOpen = !allOpen;
+    document.querySelectorAll('details').forEach(function (d) { d.open = allOpen; });
+    this.textContent = allOpen ? 'collapse all' : 'expand all';
+});
+</script>
+</body>
+</html>
+`;
+}
+
+function exportFileName(session, sessionId, title) {
+    const slug = String(title || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 48)
+        .replace(/-+$/g, '');
+    const src = (session && session.source) ? session.source + '-' : '';
+    return 'cc-' + src + sessionId.slice(0, 8) + (slug ? '-' + slug : '') + '.html';
+}
+
+function downloadTextFile(name, text) {
+    const blob = new Blob([text], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+async function exportSessionHtml(btn, sessionId, session) {
+    if (btn.disabled) return;
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `<span class="export-icon">${ICON_DOWNLOAD}</span> Exporting…`;
+    try {
+        const events = await fetchAllConversationEvents(sessionId, session.source || '');
+        const title = document.getElementById('session-title')?.textContent || sessionId;
+        const metaLine = document.getElementById('session-meta')?.textContent || '';
+        const html = buildExportHtml({ session, title, metaLine, events });
+        downloadTextFile(exportFileName(session, sessionId, session.display || title), html);
+        btn.innerHTML = `<span class="export-icon">${ICON_CHECK}</span> Exported`;
+        setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 1500);
+    } catch (err) {
+        btn.innerHTML = `<span class="export-icon">${ICON_DOWNLOAD}</span> Export failed`;
+        setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 2000);
+    }
 }
 
 // ─── Init ────────────────────────────────────────────────────
