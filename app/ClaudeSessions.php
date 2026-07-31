@@ -263,6 +263,52 @@ class ClaudeSessions {
 		return $found;
 	}
 
+	/**
+	 * Runtime stats from per-line timestamps across the main transcript plus
+	 * all subagent files, so unattended Agent-tool stretches count as activity
+	 * even when the main transcript sits quiet waiting on them.
+	 */
+	public static function extractTimings( array $session ): ?array {
+		$file = self::findSessionFile( $session['id'] ?? '', $session['project'] ?? '' );
+		if ( ! $file || ! file_exists( $file ) ) {
+			return null;
+		}
+
+		$ts = [];
+		foreach ( array_merge( [ $file ], self::subagentFiles( $file ) ) as $path ) {
+			self::collectTimestamps( $path, $ts );
+		}
+
+		return Helpers::computeTimings( $ts );
+	}
+
+	/**
+	 * Append a transcript file's top-level event timestamps (unix seconds).
+	 * Lines are decoded rather than regex-scanned - tool results can quote
+	 * other files' timestamps, which would corrupt started_at/ended_at.
+	 */
+	private static function collectTimestamps( string $file, array &$ts ): void {
+		$fp = @fopen( $file, 'r' );
+		if ( ! $fp ) {
+			return;
+		}
+		while ( ( $line = fgets( $fp ) ) !== false ) {
+			if ( strpos( $line, '"timestamp"' ) === false ) {
+				continue;
+			}
+			$obj = json_decode( $line, true );
+			$iso = $obj['timestamp'] ?? '';
+			if ( ! is_string( $iso ) || $iso === '' ) {
+				continue;
+			}
+			$t = strtotime( $iso );
+			if ( $t ) {
+				$ts[] = $t;
+			}
+		}
+		fclose( $fp );
+	}
+
 	// ─── Sessions ───────────────────────────────────────────────
 
 	/**

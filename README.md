@@ -31,6 +31,7 @@ Tools you don't use are skipped automatically. Each location can be overridden w
 - **Resume commands** - one click copies the exact CLI command to resume a session in its original tool and project directory (OpenCode, Kimi, Claude, Grok, and others; T3 opens the desktop app).
 - **Activity heatmap + usage** - GitHub-style sessions-per-day graph with token tooltips; monthly usage page for input / output / cache across providers. Opening a session parks the dashboard DOM so back restores it without refetching.
 - **Token tracking** - recorded usage where tools expose it (including Grok Build `turn_completed.usage`, with parent sessions summing nested subagent bills); estimated usage for Command Code and T3 Code.
+- **Runtime tracking** - active time per session computed from transcript timestamps (Claude Code, OpenCode, Codex), with idle gaps over 5 minutes excluded so a chat left open all day reads honestly. Sessions with a 30-minute-plus uninterrupted stretch get a "ran 1h 4m"-style chip - the agent-went-off-and-worked signal. Active hours roll up on the heatmap tooltips and the usage page.
 - **Retention monitor** - optional per-provider TTL warnings when agent tools auto-delete old transcripts.
 - **Model + live chips** - model labels on list rows when available (Grok Build includes reasoning effort); Grok Build shows a live badge for sessions still running, plus duration/tools/LOC and context window when signals are present.
 - **Index health** - listed / indexed / skipped / stale coverage in a dashboard popover next to reindex (not in the nav).
@@ -112,12 +113,13 @@ GET  /api/sessions/projects            list projects
 GET  /api/sessions/sources             available providers
 GET  /api/sessions/search?q=           deep search (?source=, ?project=)
 GET  /api/sessions/search/status       index health (listed / indexed / skipped / stale)
-GET  /api/sessions/stats/daily         per-day counts + token totals
-GET  /api/sessions/stats/monthly       per-month token totals by source
+GET  /api/sessions/stats/daily         per-day counts + token totals + active seconds
+GET  /api/sessions/stats/monthly       per-month token totals + active seconds by source
 GET  /api/sessions/{id}                session meta (incl. nested subagents)
 GET  /api/sessions/{id}/conversation   paginated events (?limit= up to 1000, ?offset=; omit offset for tail)
 POST /api/sessions/search/reindex      rebuild the index
 POST /api/sessions/tokens/backfill     backfill token usage for indexed sessions
+POST /api/sessions/timings/backfill    backfill runtime stats for indexed sessions
 GET  /api/retention                    retention report (?prefer= preferences)
 GET  /stream?session={id}              SSE replay of a session
 ```

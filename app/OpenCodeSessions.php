@@ -177,6 +177,23 @@ class OpenCodeSessions {
 		return $found ? $totals : null;
 	}
 
+	/**
+	 * Runtime stats from message created/completed times (ms epochs).
+	 */
+	public static function extractTimings( array $session ): ?array {
+		$ts = [];
+		foreach ( self::sessionMessages( $session['id'] ?? '' ) as $msg ) {
+			foreach ( [ 'created', 'completed' ] as $key ) {
+				$ms = $msg['time'][ $key ] ?? 0;
+				if ( is_numeric( $ms ) && $ms > 0 ) {
+					$ts[] = intval( $ms / 1000 );
+				}
+			}
+		}
+
+		return Helpers::computeTimings( $ts );
+	}
+
 	// ─── Listing ────────────────────────────────────────────────
 
 	public static function listSessions( ?string $project = null ): array {

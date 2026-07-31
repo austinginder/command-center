@@ -97,6 +97,59 @@ class Helpers {
 	}
 
 	/**
+	 * Session runtime from a set of event timestamps (unix seconds).
+	 *
+	 * Wall-clock span (first event to last) lies for interactive sessions left
+	 * open all day, so activity is measured WakaTime-style: consecutive events
+	 * closer than $idleGap seconds count as one active stretch, larger gaps are
+	 * idle and contribute nothing.
+	 *
+	 *   started_at / ended_at    - first / last event (unix seconds)
+	 *   active_seconds           - sum of all active stretches
+	 *   longest_active_seconds   - single longest uninterrupted stretch; this is
+	 *                              the "agent ran for an hour straight" signal
+	 *
+	 * Returns null when no usable timestamps were supplied.
+	 */
+	public static function computeTimings( array $timestamps, int $idleGap = 300 ): ?array {
+		$ts = [];
+		foreach ( $timestamps as $t ) {
+			$t = (int) $t;
+			if ( $t > 0 ) {
+				$ts[] = $t;
+			}
+		}
+		if ( empty( $ts ) ) {
+			return null;
+		}
+		sort( $ts );
+
+		$active   = 0;
+		$longest  = 0;
+		$runStart = $ts[0];
+		$prev     = $ts[0];
+
+		foreach ( $ts as $t ) {
+			$gap = $t - $prev;
+			if ( $gap <= $idleGap ) {
+				$active += $gap;
+			} else {
+				$longest  = max( $longest, $prev - $runStart );
+				$runStart = $t;
+			}
+			$prev = $t;
+		}
+		$longest = max( $longest, $prev - $runStart );
+
+		return [
+			'started_at'             => $ts[0],
+			'ended_at'               => $prev,
+			'active_seconds'         => $active,
+			'longest_active_seconds' => $longest,
+		];
+	}
+
+	/**
 	 * Short model label for session list chips.
 	 * "claude-opus-4-6" → "opus-4-6", "anthropic/claude-sonnet-4" → "sonnet-4",
 	 * "grok-4.5" stays "grok-4.5".

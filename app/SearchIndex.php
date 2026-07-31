@@ -51,6 +51,10 @@ class SearchIndex {
 				tokens_output         INTEGER,
 				tokens_cache_read     INTEGER,
 				tokens_cache_creation INTEGER,
+				started_at            INTEGER,
+				ended_at              INTEGER,
+				active_seconds        INTEGER,
+				longest_active_seconds INTEGER,
 				PRIMARY KEY (source, session_id)
 			)
 		' );
@@ -73,6 +77,14 @@ class SearchIndex {
 			$db->exec( 'ALTER TABLE session_files ADD COLUMN tokens_output INTEGER' );
 			$db->exec( 'ALTER TABLE session_files ADD COLUMN tokens_cache_read INTEGER' );
 			$db->exec( 'ALTER TABLE session_files ADD COLUMN tokens_cache_creation INTEGER' );
+		}
+
+		// Runtime columns (NULL = not yet computed - see backfillTimings()).
+		if ( ! in_array( 'active_seconds', $cols, true ) ) {
+			$db->exec( 'ALTER TABLE session_files ADD COLUMN started_at INTEGER' );
+			$db->exec( 'ALTER TABLE session_files ADD COLUMN ended_at INTEGER' );
+			$db->exec( 'ALTER TABLE session_files ADD COLUMN active_seconds INTEGER' );
+			$db->exec( 'ALTER TABLE session_files ADD COLUMN longest_active_seconds INTEGER' );
 		}
 
 		$db->exec( 'CREATE INDEX IF NOT EXISTS idx_sf_project   ON session_files(project)' );
@@ -156,10 +168,12 @@ class SearchIndex {
 			$metaStmt = $db->prepare( '
 				INSERT OR REPLACE INTO session_files
 					(session_id, source, file_path, project, project_name, display, timestamp_ms, file_size, file_mtime, indexed_at,
-					 tokens_input, tokens_output, tokens_cache_read, tokens_cache_creation)
+					 tokens_input, tokens_output, tokens_cache_read, tokens_cache_creation,
+					 started_at, ended_at, active_seconds, longest_active_seconds)
 				VALUES
 					(:id, :source, :path, :project, :pname, :display, :ts, :size, :mtime, :now,
-					 :tok_in, :tok_out, :tok_cr, :tok_cc)
+					 :tok_in, :tok_out, :tok_cr, :tok_cc,
+					 :t_start, :t_end, :t_active, :t_longest)
 			' );
 
 			$ftsDeleteStmt = $db->prepare( 'DELETE FROM sessions_fts WHERE session_id = :id AND source = :source' );
@@ -177,8 +191,9 @@ class SearchIndex {
 				$path = SessionRegistry::findSessionFile( $s['id'] ?? '', $s['project'] ?? null, $source ) ?? '';
 
 				// Zero (not NULL) when the provider tracks nothing, so the row
-				// isn't endlessly re-visited by backfillUsage().
-				$usage = SessionRegistry::extractUsage( $s ) ?: [ 'input' => 0, 'output' => 0, 'cache_read' => 0, 'cache_creation' => 0 ];
+				// isn't endlessly re-visited by backfillUsage() / backfillTimings().
+				$usage   = SessionRegistry::extractUsage( $s ) ?: [ 'input' => 0, 'output' => 0, 'cache_read' => 0, 'cache_creation' => 0 ];
+				$timings = SessionRegistry::extractTimings( $s ) ?: [ 'started_at' => 0, 'ended_at' => 0, 'active_seconds' => 0, 'longest_active_seconds' => 0 ];
 
 				$metaStmt->bindValue( ':id',      $s['id'],                SQLITE3_TEXT );
 				$metaStmt->bindValue( ':source',  $source,                 SQLITE3_TEXT );
@@ -194,6 +209,10 @@ class SearchIndex {
 				$metaStmt->bindValue( ':tok_out', $usage['output'],         SQLITE3_INTEGER );
 				$metaStmt->bindValue( ':tok_cr',  $usage['cache_read'],     SQLITE3_INTEGER );
 				$metaStmt->bindValue( ':tok_cc',  $usage['cache_creation'], SQLITE3_INTEGER );
+				$metaStmt->bindValue( ':t_start',   $timings['started_at'],             SQLITE3_INTEGER );
+				$metaStmt->bindValue( ':t_end',     $timings['ended_at'],               SQLITE3_INTEGER );
+				$metaStmt->bindValue( ':t_active',  $timings['active_seconds'],         SQLITE3_INTEGER );
+				$metaStmt->bindValue( ':t_longest', $timings['longest_active_seconds'], SQLITE3_INTEGER );
 				$metaStmt->execute();
 				$metaStmt->reset();
 
@@ -352,7 +371,8 @@ class SearchIndex {
 			       COUNT(*) AS sessions,
 			       SUM(CASE WHEN $tokenFilter THEN COALESCE(tokens_input, 0) + COALESCE(tokens_cache_creation, 0) ELSE 0 END) AS tokens_in,
 			       SUM(CASE WHEN $tokenFilter THEN COALESCE(tokens_output, 0) ELSE 0 END) AS tokens_out,
-			       SUM(CASE WHEN $tokenFilter THEN COALESCE(tokens_cache_read, 0) ELSE 0 END) AS tokens_cache
+			       SUM(CASE WHEN $tokenFilter THEN COALESCE(tokens_cache_read, 0) ELSE 0 END) AS tokens_cache,
+			       SUM(COALESCE(active_seconds, 0)) AS active_seconds
 			FROM session_files
 			WHERE timestamp_ms > 0
 		";
@@ -376,11 +396,12 @@ class SearchIndex {
 		$rows   = [];
 		while ( $row = $result->fetchArray( SQLITE3_ASSOC ) ) {
 			$rows[] = [
-				'day'          => $row['day'],
-				'sessions'     => (int) $row['sessions'],
-				'tokens_in'    => (int) $row['tokens_in'],
-				'tokens_out'   => (int) $row['tokens_out'],
-				'tokens_cache' => (int) $row['tokens_cache'],
+				'day'            => $row['day'],
+				'sessions'       => (int) $row['sessions'],
+				'tokens_in'      => (int) $row['tokens_in'],
+				'tokens_out'     => (int) $row['tokens_out'],
+				'tokens_cache'   => (int) $row['tokens_cache'],
+				'active_seconds' => (int) $row['active_seconds'],
 			];
 		}
 		return $rows;
@@ -405,7 +426,8 @@ class SearchIndex {
 			       SUM(COALESCE(tokens_input, 0)) AS tokens_input,
 			       SUM(COALESCE(tokens_output, 0)) AS tokens_output,
 			       SUM(COALESCE(tokens_cache_read, 0)) AS tokens_cache_read,
-			       SUM(COALESCE(tokens_cache_creation, 0)) AS tokens_cache_creation
+			       SUM(COALESCE(tokens_cache_creation, 0)) AS tokens_cache_creation,
+			       SUM(COALESCE(active_seconds, 0)) AS active_seconds
 			FROM session_files
 			WHERE timestamp_ms > 0
 		";
@@ -430,9 +452,90 @@ class SearchIndex {
 				'tokens_output'         => (int) $row['tokens_output'],
 				'tokens_cache_read'     => (int) $row['tokens_cache_read'],
 				'tokens_cache_creation' => (int) $row['tokens_cache_creation'],
+				'active_seconds'        => (int) $row['active_seconds'],
 			];
 		}
 		return $rows;
+	}
+
+	/**
+	 * Attach indexed runtime stats to a live session list. One query builds a
+	 * (source, id) map, so this stays cheap enough for the hot /sessions
+	 * endpoint; unindexed sessions simply pass through without timing fields.
+	 */
+	public static function annotateTimings( array $sessions ): array {
+		$db  = self::db();
+		$map = [];
+
+		$res = $db->query( 'SELECT session_id, source, started_at, ended_at, active_seconds, longest_active_seconds FROM session_files WHERE active_seconds > 0' );
+		if ( $res ) {
+			while ( $row = $res->fetchArray( SQLITE3_ASSOC ) ) {
+				$map[ $row['source'] . '|' . $row['session_id'] ] = $row;
+			}
+		}
+
+		foreach ( $sessions as &$s ) {
+			$row = $map[ ( $s['source'] ?? 'claude' ) . '|' . ( $s['id'] ?? '' ) ] ?? null;
+			if ( $row ) {
+				$s['started_at']             = (int) $row['started_at'];
+				$s['ended_at']               = (int) $row['ended_at'];
+				$s['active_seconds']         = (int) $row['active_seconds'];
+				$s['longest_active_seconds'] = (int) $row['longest_active_seconds'];
+			}
+		}
+		unset( $s );
+
+		return $sessions;
+	}
+
+	/**
+	 * Compute runtime stats for already-indexed rows that predate the timing
+	 * columns (active_seconds IS NULL). Providers without timestamps get 0s so
+	 * each row is only visited once. Batched - call repeatedly until
+	 * remaining hits 0.
+	 */
+	public static function backfillTimings( int $limit = 500 ): array {
+		$start = microtime( true );
+		$db    = self::db();
+
+		$res  = $db->query( 'SELECT session_id, source, project FROM session_files WHERE active_seconds IS NULL LIMIT ' . (int) $limit );
+		$rows = [];
+		while ( $row = $res->fetchArray( SQLITE3_ASSOC ) ) {
+			$rows[] = $row;
+		}
+
+		$update = $db->prepare( '
+			UPDATE session_files
+			SET started_at = :t_start, ended_at = :t_end, active_seconds = :t_active, longest_active_seconds = :t_longest
+			WHERE source = :source AND session_id = :id
+		' );
+
+		$processed = 0;
+		foreach ( $rows as $row ) {
+			$timings = SessionRegistry::extractTimings( [
+				'id'      => $row['session_id'],
+				'source'  => $row['source'],
+				'project' => $row['project'],
+			] ) ?: [ 'started_at' => 0, 'ended_at' => 0, 'active_seconds' => 0, 'longest_active_seconds' => 0 ];
+
+			$update->bindValue( ':id',        $row['session_id'],                 SQLITE3_TEXT );
+			$update->bindValue( ':source',    $row['source'],                     SQLITE3_TEXT );
+			$update->bindValue( ':t_start',   $timings['started_at'],             SQLITE3_INTEGER );
+			$update->bindValue( ':t_end',     $timings['ended_at'],               SQLITE3_INTEGER );
+			$update->bindValue( ':t_active',  $timings['active_seconds'],         SQLITE3_INTEGER );
+			$update->bindValue( ':t_longest', $timings['longest_active_seconds'], SQLITE3_INTEGER );
+			$update->execute();
+			$update->reset();
+			$processed++;
+		}
+
+		$remaining = (int) $db->querySingle( 'SELECT COUNT(*) FROM session_files WHERE active_seconds IS NULL' );
+
+		return [
+			'processed'  => $processed,
+			'remaining'  => $remaining,
+			'elapsed_ms' => round( ( microtime( true ) - $start ) * 1000 ),
+		];
 	}
 
 	/**

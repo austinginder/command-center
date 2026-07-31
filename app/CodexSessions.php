@@ -101,6 +101,34 @@ class CodexSessions {
 		return null;
 	}
 
+	/**
+	 * Runtime stats from the rollout's per-event timestamps.
+	 */
+	public static function extractTimings( array $session ): ?array {
+		$file = self::findSessionFile( $session['id'] ?? '', $session['project'] ?? null );
+		if ( ! $file ) {
+			return null;
+		}
+		$fh = @fopen( $file, 'r' );
+		if ( ! $fh ) {
+			return null;
+		}
+		$ts = [];
+		while ( ( $line = fgets( $fh ) ) !== false ) {
+			$obj = json_decode( trim( $line ), true );
+			if ( ! is_array( $obj ) ) {
+				continue;
+			}
+			$ms = self::parseIsoMs( $obj['timestamp'] ?? null );
+			if ( $ms > 0 ) {
+				$ts[] = intval( $ms / 1000 );
+			}
+		}
+		fclose( $fh );
+
+		return Helpers::computeTimings( $ts );
+	}
+
 	public static function extractSessionText( array $session ): string {
 		$parts    = [];
 		$maxChars = 10000;
@@ -636,7 +664,8 @@ class CodexSessions {
 				'reasoning_effort' => $effort,
 				'cli_version'      => $peek['cli_version'] ?? trim( (string) ( $meta['cli_version'] ?? '' ) ),
 				'originator'       => $peek['originator'] ?? trim( (string) ( $meta['originator'] ?? '' ) ),
-				'codex_source'     => trim( (string) ( $meta['source'] ?? '' ) ),
+				// Newer ChatGPT-desktop rollouts store source as an object.
+				'codex_source'     => is_string( $meta['source'] ?? null ) ? trim( $meta['source'] ) : '',
 			];
 		}
 		usort( $out, fn( $a, $b ) => $b['timestamp'] <=> $a['timestamp'] );

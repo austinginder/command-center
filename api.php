@@ -77,6 +77,13 @@ if ( $method === 'GET' && $path === '/sessions' ) {
 	if ( $expiring !== null ) {
 		$sessions = Retention::expiringSessions( $sessions, max( 0, $expiring ) );
 	}
+	// Indexed runtime stats (active time / longest stretch); best-effort.
+	try {
+		require_once BASE_DIR . '/app/SearchIndex.php';
+		$sessions = SearchIndex::annotateTimings( $sessions );
+	} catch ( \Throwable $e ) {
+		// Index unavailable - list still works without timing fields.
+	}
 	echo json_encode( $sessions );
 	exit;
 }
@@ -171,6 +178,15 @@ if ( $method === 'POST' && $path === '/sessions/tokens/backfill' ) {
 	exit;
 }
 
+// POST /api/sessions/timings/backfill - compute runtime stats for rows indexed before the timing columns existed
+if ( $method === 'POST' && $path === '/sessions/timings/backfill' ) {
+	set_time_limit( 600 );
+	require_once BASE_DIR . '/app/SearchIndex.php';
+	$limit = min( 2000, max( 1, (int) ( $_GET['limit'] ?? 500 ) ) );
+	echo json_encode( SearchIndex::backfillTimings( $limit ) );
+	exit;
+}
+
 // GET /api/sessions/search/status - index health/stats (+ listed/skipped/stale)
 if ( $method === 'GET' && $path === '/sessions/search/status' ) {
 	require_once BASE_DIR . '/app/SearchIndex.php';
@@ -252,6 +268,12 @@ if ( $method === 'GET' && preg_match( '#^/sessions/([A-Za-z0-9_-]+)$#', $path, $
 		exit;
 	}
 	$annotated = Retention::annotateSessions( [ $session ] );
+	try {
+		require_once BASE_DIR . '/app/SearchIndex.php';
+		$annotated = SearchIndex::annotateTimings( $annotated );
+	} catch ( \Throwable $e ) {
+		// Index unavailable - meta still works without timing fields.
+	}
 	echo json_encode( $annotated[0] ?? $session );
 	exit;
 }

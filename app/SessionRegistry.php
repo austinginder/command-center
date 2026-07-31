@@ -19,6 +19,10 @@
  * Optional (providers whose storage records token usage):
  *   extractUsage(array $session)                   : ?array  // ['input','output','cache_read','cache_creation']
  *
+ * Optional (providers whose storage records per-event timestamps):
+ *   extractTimings(array $session)                 : ?array  // ['started_at','ended_at','active_seconds','longest_active_seconds']
+ *                                                            // build via Helpers::computeTimings()
+ *
  * Session record shape (all providers):
  *   id, display, timestamp (ms), timestamp_s, project (path), projectName, size, source, sourceLabel
  *
@@ -333,6 +337,25 @@ class SessionRegistry {
 		}
 		try {
 			return $class::extractUsage( $session );
+		} catch ( \Throwable $e ) {
+			return null;
+		}
+	}
+
+	/**
+	 * Session runtime stats (active time, longest uninterrupted stretch), or
+	 * null when the provider's storage has no per-event timestamps. Currently
+	 * Claude Code, OpenCode, and Codex; Grok Build carries its own duration_ms
+	 * signal on the session record instead.
+	 */
+	public static function extractTimings( array $session ): ?array {
+		$src   = $session['source'] ?? null;
+		$class = $src ? self::provider( $src ) : null;
+		if ( ! $class || ! method_exists( $class, 'extractTimings' ) ) {
+			return null;
+		}
+		try {
+			return $class::extractTimings( $session );
 		} catch ( \Throwable $e ) {
 			return null;
 		}

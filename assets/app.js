@@ -306,13 +306,45 @@ function formatDurationMs(ms) {
     return `${d}d ${h % 24}h`;
 }
 
-/** Compact weight label: duration and/or byte size for list rows. */
+/**
+ * Active runtime for a session in ms. Grok Build records its own duration_ms
+ * signal; other providers get index-computed active_seconds (sum of active
+ * stretches, idle gaps excluded).
+ */
+function sessionActiveMs(s) {
+    if (!s) return null;
+    if (s.duration_ms != null && s.duration_ms > 0) return s.duration_ms;
+    if (s.active_seconds != null && s.active_seconds > 0) return s.active_seconds * 1000;
+    return null;
+}
+
+/** Compact hours label for runtime totals: "42m", "3.4h", "127h". */
+function formatActiveSeconds(sec) {
+    if (!sec || sec <= 0) return '';
+    if (sec < 3600) return Math.round(sec / 60) + 'm';
+    const h = sec / 3600;
+    return (h >= 100 ? Math.round(h) : +h.toFixed(1)) + 'h';
+}
+
+/** Compact weight label: active runtime and/or byte size for list rows. */
 function sessionWeightLabel(s) {
     if (!s) return '';
     const parts = [];
-    if (s.duration_ms != null && s.duration_ms > 0) parts.push(formatDurationMs(s.duration_ms));
+    const activeMs = sessionActiveMs(s);
+    if (activeMs) parts.push(formatDurationMs(activeMs));
     if (s.size) parts.push(formatBytes(s.size));
     return parts.join(' · ');
+}
+
+/**
+ * Chip for sessions with a long uninterrupted stretch - the "agent ran for an
+ * hour straight" signal. Only shown from 30 minutes up so routine back-and-forth
+ * sessions stay quiet.
+ */
+function longRunBadge(s) {
+    if (!s || !s.longest_active_seconds || s.longest_active_seconds < 1800) return '';
+    const label = 'ran ' + formatDurationMs(s.longest_active_seconds * 1000);
+    return `<span class="hidden sm:inline-block shrink-0 text-[10px] font-mono px-1.5 py-0.5 rounded border border-indigo-300/70 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400" title="Longest uninterrupted active stretch">${esc(label)}</span>`;
 }
 
 /** LOC chip from agent_lines_added / agent_lines_removed (Grok signals). */
@@ -1200,7 +1232,7 @@ function renderDashboard() {
 
                 rects += `<rect class="hm-cell hm-l${level(n)}${key === dayFilter ? ' hm-selected' : ''}" x="${LEFT + week * PITCH}" y="${TOP + wd * PITCH}"
                     width="${CELL}" height="${CELL}" rx="2" data-day="${key}" data-count="${n}"
-                    data-tin="${s ? s.tokens_in : 0}" data-tout="${s ? s.tokens_out : 0}"
+                    data-tin="${s ? s.tokens_in : 0}" data-tout="${s ? s.tokens_out : 0}" data-act="${s ? s.active_seconds || 0 : 0}"
                     aria-label="${n} session${n !== 1 ? 's' : ''} on ${key}"></rect>`;
             } else {
                 rects += `<rect class="hm-future" x="${LEFT + week * PITCH}" y="${TOP + wd * PITCH}"
@@ -1284,6 +1316,14 @@ function renderDashboard() {
                 tok.className = 'hm-tip-sub';
                 tok.textContent = formatTokens(tin) + ' in · ' + formatTokens(tout) + ' out';
                 tip.appendChild(tok);
+            }
+
+            const act = parseInt(cell.dataset.act, 10);
+            if (act > 0) {
+                const dur = document.createElement('div');
+                dur.className = 'hm-tip-sub';
+                dur.textContent = formatActiveSeconds(act) + ' active';
+                tip.appendChild(dur);
             }
 
             tip.style.display = 'block';
@@ -1404,6 +1444,7 @@ function renderDashboard() {
             ${modelBadge(s.model, s.reasoning_effort)}
             ${agentNameBadge(s.agent_name)}
             ${countBadge}
+            ${longRunBadge(s)}
             ${retentionBadge(s, showRetentionBadges())}
             <span class="hidden md:block max-w-[240px] truncate text-xs font-mono text-zinc-400 dark:text-cc-dim" title="${esc(shortPath(s.project) || '')}">${esc(projectLabel(s.project) || s.projectName || '')}</span>
             <span class="hidden sm:block min-w-[5rem] max-w-[9rem] text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap truncate" title="${esc(sessionWeightLabel(s))}">${esc(sessionWeightLabel(s))}</span>
@@ -1876,7 +1917,7 @@ function renderUsageView() {
                 <div id="usage-pills" class="flex flex-wrap items-center gap-1.5"></div>
             </div>
             <div id="usage-note" class="hidden text-[11px] font-mono text-zinc-400 dark:text-cc-dim"></div>
-            <div id="usage-kpis" class="grid grid-cols-2 sm:grid-cols-4 gap-3"></div>
+            <div id="usage-kpis" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3"></div>
             <div class="bg-white dark:bg-cc-card rounded-xl border border-zinc-200 dark:border-cc-line shadow-sm px-4 pt-3.5 pb-2">
                 <div class="flex flex-wrap items-baseline justify-between gap-2">
                     <span class="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-cc-dim">Tokens per month</span>
@@ -1926,12 +1967,13 @@ function renderUsageView() {
         rows.forEach(r => {
             if (activeSource && r.source !== activeSource) return;
             if (!activeSource && est.has(r.source)) return;
-            const t = byMonth[r.month] || (byMonth[r.month] = { sessions: 0, input: 0, output: 0, cache_read: 0, cache_creation: 0 });
+            const t = byMonth[r.month] || (byMonth[r.month] = { sessions: 0, input: 0, output: 0, cache_read: 0, cache_creation: 0, active_seconds: 0 });
             t.sessions += r.sessions;
             t.input += r.tokens_input;
             t.output += r.tokens_output;
             t.cache_read += r.tokens_cache_read;
             t.cache_creation += r.tokens_cache_creation;
+            t.active_seconds += r.active_seconds || 0;
         });
         return Object.keys(byMonth).sort().map(month => ({ month, ...byMonth[month], fresh: byMonth[month].input + byMonth[month].cache_creation }));
     }
@@ -2093,7 +2135,8 @@ function renderUsageView() {
         const tot = months.reduce((a, m) => ({
             sessions: a.sessions + m.sessions, fresh: a.fresh + m.fresh,
             output: a.output + m.output, cache_read: a.cache_read + m.cache_read,
-        }), { sessions: 0, fresh: 0, output: 0, cache_read: 0 });
+            active_seconds: a.active_seconds + m.active_seconds,
+        }), { sessions: 0, fresh: 0, output: 0, cache_read: 0, active_seconds: 0 });
 
         const first = months.length ? monthLabel(months[0].month, true) : '';
         const last = months.length ? monthLabel(months[months.length - 1].month, true) : '';
@@ -2102,7 +2145,8 @@ function renderUsageView() {
             kpiTile('Output tokens', tilde + formatTokens(tot.output), range) +
             kpiTile('Fresh input', tilde + formatTokens(tot.fresh), 'input + cache writes') +
             kpiTile('Cache reads', tilde + formatTokens(tot.cache_read), '') +
-            kpiTile('Sessions', tot.sessions.toLocaleString(), '');
+            kpiTile('Sessions', tot.sessions.toLocaleString(), '') +
+            kpiTile('Active time', formatActiveSeconds(tot.active_seconds) || '0m', 'idle gaps excluded');
 
         drawChart(document.getElementById('usage-chart-main'), months, [
             { key: 'fresh', cls: 'uz-in', keyCls: 'in', label: 'fresh input' },
@@ -2130,13 +2174,14 @@ function renderUsageView() {
 
         let html = `<div class="overflow-x-auto"><table class="w-full text-xs font-mono" style="font-variant-numeric: tabular-nums">
             <thead><tr class="border-b border-zinc-100 dark:border-cc-line2">
-                ${th('Month', false)}${th('Sessions')}${th('Input')}${th('Cache writes')}${th('Cache reads')}${th('Output')}
+                ${th('Month', false)}${th('Sessions')}${th('Active')}${th('Input')}${th('Cache writes')}${th('Cache reads')}${th('Output')}
             </tr></thead><tbody>`;
 
         [...months].reverse().forEach(m => {
             html += `<tr class="border-t border-zinc-100 dark:border-cc-line2 hover:bg-zinc-50 dark:hover:bg-cc-panel">
                 <td class="px-4 py-2 text-zinc-800 dark:text-cc-ink whitespace-nowrap">${esc(monthLongLabel(m.month))}</td>
                 <td class="px-4 py-2 text-right text-zinc-500 dark:text-cc-mut">${m.sessions.toLocaleString()}</td>
+                <td class="px-4 py-2 text-right text-zinc-500 dark:text-cc-mut">${formatActiveSeconds(m.active_seconds) || '<span class="text-zinc-300 dark:text-cc-line3">0</span>'}</td>
                 <td class="px-4 py-2 text-right text-zinc-500 dark:text-cc-mut">${num(m.input)}</td>
                 <td class="px-4 py-2 text-right text-zinc-500 dark:text-cc-mut">${num(m.cache_creation)}</td>
                 <td class="px-4 py-2 text-right text-zinc-500 dark:text-cc-mut">${num(m.cache_read)}</td>
@@ -2309,7 +2354,9 @@ function renderSessionView(sessionId) {
                 if (s.sandbox_profile && String(s.sandbox_profile).toLowerCase() !== 'off') {
                     parts.push('sandbox ' + s.sandbox_profile);
                 }
-                if (s.duration_ms != null && s.duration_ms > 0) parts.push(formatDurationMs(s.duration_ms));
+                if (s.active_seconds > 0) parts.push(formatDurationMs(s.active_seconds * 1000) + ' active');
+                else if (s.duration_ms != null && s.duration_ms > 0) parts.push(formatDurationMs(s.duration_ms));
+                if (s.longest_active_seconds >= 300) parts.push('longest stretch ' + formatDurationMs(s.longest_active_seconds * 1000));
                 if (s.turn_count) parts.push(s.turn_count + (s.turn_count === 1 ? ' turn' : ' turns'));
                 if (s.message_count) parts.push(s.message_count + (s.message_count === 1 ? ' msg' : ' msgs'));
                 if (s.tool_calls != null) parts.push(s.tool_calls + (s.tool_calls === 1 ? ' tool' : ' tools'));
