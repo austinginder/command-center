@@ -229,7 +229,18 @@ function sourceBadge(source, label) {
 function sourceDot(s) {
     const src = (s && s.source) || 'claude';
     const dot = SOURCE_DOTS[src] || SOURCE_DOTS.claude;
-    return `<span class="shrink-0 w-2 h-2 rounded-full ${dot}" title="${esc((s && s.sourceLabel) || src)}"></span>`;
+    const label = (s && s.sourceLabel) || src;
+    if (!(s && s.live)) {
+        return `<span class="shrink-0 w-2 h-2 rounded-full ${dot}" title="${esc(label)}"></span>`;
+    }
+    // A running session pings its own source dot. Rarer than one row in a
+    // thousand, so the animation carries it without spending a chip on the
+    // word - the tooltip still names the state and the pid.
+    const tip = label + ' · live' + (s.live_pid ? ` (pid ${s.live_pid})` : '');
+    return `<span class="relative flex shrink-0 w-2 h-2" title="${esc(tip)}">
+        <span class="animate-ping absolute inline-flex w-full h-full rounded-full opacity-75 ${dot}"></span>
+        <span class="relative inline-flex w-2 h-2 rounded-full ${dot}"></span>
+    </span>`;
 }
 
 /**
@@ -254,14 +265,16 @@ function identityBadge(s) {
 }
 
 /**
- * Agent persona/role chip (Grok summary.agent_name). Skip the default
+ * Agent persona/role label (Grok summary.agent_name). Ambient context rather
+ * than status or identity, so it reads as plain dim text: a border here would
+ * make it compete with the identity chip next to it. Skip the default
  * "general-purpose" label so every row is not noise.
  */
 function agentNameBadge(name) {
     const n = String(name || '').trim();
     if (!n) return '';
     if (n.toLowerCase() === 'general-purpose') return '';
-    return `<span class="hidden sm:inline-block shrink-0 max-w-[8rem] truncate text-[10px] font-mono px-1.5 py-0.5 rounded border border-zinc-200 dark:border-cc-line3 text-zinc-500 dark:text-cc-dim" title="Agent: ${esc(n)}">${esc(n)}</span>`;
+    return `<span class="hidden sm:inline-block shrink-0 max-w-[8rem] truncate text-[10px] font-mono text-zinc-400 dark:text-cc-dim" title="Agent: ${esc(n)}">${esc(n)}</span>`;
 }
 
 function shortModelName(model) {
@@ -274,13 +287,6 @@ function shortModelName(model) {
     if (/^(grok|gpt)[-_.]?/i.test(name)) return name.toLowerCase();
     name = name.replace(/^(claude|google|gemini|openai|xai)[-_]/i, '');
     return name || raw;
-}
-
-/** Grok (and future) live session chip when the agent process is still up. */
-function liveBadge(s) {
-    if (!s || !s.live) return '';
-    const tip = s.live_pid ? `Live process PID ${s.live_pid}` : 'Session is currently active';
-    return `<span class="shrink-0 inline-flex items-center gap-1 text-[10px] font-mono font-medium px-1.5 py-0.5 rounded border border-emerald-300/80 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400" title="${esc(tip)}"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>live</span>`;
 }
 
 /** Predicted expiry chip for providers with a known day TTL (e.g. Claude). */
@@ -1475,25 +1481,24 @@ function renderDashboard() {
         const children = Array.isArray(s.children) ? s.children : [];
         const n = children.length || s.subagent_count || 0;
         const expanded = expandedParents.has(s.id);
-        const chevron = n > 0
-            ? `<button type="button" class="subagent-toggle shrink-0 p-0.5 rounded text-zinc-400 dark:text-cc-dim hover:text-zinc-700 dark:hover:text-cc-soft" data-parent-id="${esc(s.id)}" title="${expanded ? 'Collapse' : 'Expand'} ${n} subagent${n === 1 ? '' : 's'}" aria-expanded="${expanded ? 'true' : 'false'}">
-                <svg class="w-3.5 h-3.5 transition-transform ${expanded ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+        // Chevron and subagent count share one fixed-width slot. The count
+        // belongs to the control that expands it, and a fixed slot keeps every
+        // title starting at the same x whether or not a row has children.
+        const expander = n > 0
+            ? `<button type="button" class="subagent-toggle flex items-center gap-0.5 shrink-0 w-9 p-0.5 rounded text-zinc-400 dark:text-cc-dim hover:text-zinc-700 dark:hover:text-cc-soft" data-parent-id="${esc(s.id)}" title="${expanded ? 'Collapse' : 'Expand'} ${n} subagent${n === 1 ? '' : 's'}" aria-expanded="${expanded ? 'true' : 'false'}">
+                <svg class="w-3.5 h-3.5 shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                <span class="text-[10px] font-mono leading-none">${n}</span>
                </button>`
-            : `<span class="w-4 shrink-0"></span>`;
-        const countBadge = n > 0
-            ? `<span class="shrink-0 text-[10px] font-mono px-1.5 py-0.5 rounded border border-zinc-200 dark:border-cc-line3 text-zinc-500 dark:text-cc-dim">${n} agent${n === 1 ? '' : 's'}</span>`
-            : '';
+            : `<span class="w-9 shrink-0"></span>`;
 
         let html = `
         <div class="session-row group flex items-center gap-2 sm:gap-3 px-4 py-2 cursor-pointer border-t border-zinc-100 dark:border-cc-line2 hover:bg-zinc-50 dark:hover:bg-cc-panel"
              data-session-id="${esc(s.id)}" data-source="${esc(src)}">
-            ${chevron}
+            ${expander}
             ${sourceDot(s)}
             <span class="flex-1 min-w-0 truncate text-sm text-zinc-800 dark:text-cc-ink" title="${esc(title)}">${esc(title)}</span>
-            ${liveBadge(s)}
             ${identityBadge(s)}
             ${agentNameBadge(s.agent_name)}
-            ${countBadge}
             ${retentionBadge(s, showRetentionBadges())}
             ${showProject ? `<span class="hidden md:block max-w-[240px] truncate text-xs font-mono text-zinc-400 dark:text-cc-dim" title="${esc(shortPath(s.project) || '')}">${esc(projectLabel(s.project) || s.projectName || '')}</span>` : ''}
             <span class="hidden sm:block min-w-[3.5rem] max-w-[6rem] text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap truncate" title="${esc(sessionWeightTitle(s))}">${sessionWeightHtml(s)}</span>
@@ -1512,7 +1517,7 @@ function renderDashboard() {
                     ? '<span class="w-[26px] shrink-0"></span>'
                     : copyBtnHtml(src, c.project || s.project, c.id);
                 html += `
-                <div class="session-row session-row-child group flex items-center gap-2 sm:gap-3 pl-10 pr-4 py-1.5 cursor-pointer border-t border-zinc-50 dark:border-cc-line2 hover:bg-zinc-50 dark:hover:bg-cc-panel"
+                <div class="session-row session-row-child group flex items-center gap-2 sm:gap-3 pl-20 pr-4 py-1.5 cursor-pointer border-t border-zinc-50 dark:border-cc-line2 hover:bg-zinc-50 dark:hover:bg-cc-panel"
                      data-session-id="${esc(c.id)}" data-source="${esc(src)}" data-parent-id="${esc(s.id)}">
                     <span class="w-1.5 h-1.5 rounded-full shrink-0 ${subagentStatusDot(c.status)}" title="${esc(c.status || '')}"></span>
                     <span class="flex-1 min-w-0 truncate text-[13px] text-zinc-600 dark:text-cc-mut" title="${esc(cTitle)}">${esc(cTitle)}</span>
