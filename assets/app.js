@@ -222,17 +222,35 @@ function sourceBadge(source, label) {
     return `<span class="inline-block shrink-0 text-[11px] font-mono font-medium px-1.5 py-0.5 rounded border ${colors}" title="${esc(label || source)}">${esc(source)}</span>`;
 }
 
-/** Short model chip for list rows (full id in title). Optional effort suffix (Codex/Grok). */
-function modelBadge(model, effort) {
-    if (!model) return '';
+/**
+ * Source dot for the left rail of a list row. Keeps the scan-by-tool colour
+ * without spending a text column on a word the identity chip usually repeats.
+ */
+function sourceDot(s) {
+    const src = (s && s.source) || 'claude';
+    const dot = SOURCE_DOTS[src] || SOURCE_DOTS.claude;
+    return `<span class="shrink-0 w-2 h-2 rounded-full ${dot}" title="${esc((s && s.sourceLabel) || src)}"></span>`;
+}
+
+/**
+ * One identity chip per row: the short model name, tinted with its source
+ * colour. The model already names the tool on most rows (grok-4.5, gpt-5.6),
+ * so a separate source badge only restates it. Rows with no model fall back
+ * to the source name so the slot never reads empty.
+ */
+function identityBadge(s) {
+    const src = (s && s.source) || 'claude';
+    const colors = SOURCE_COLORS[src] || SOURCE_COLORS.claude;
+    const model = s && s.model;
+    const effort = s && s.reasoning_effort;
     const short = shortModelName(model);
-    if (!short) return '';
-    const eff = effort && String(effort).trim() && String(effort).toLowerCase() !== 'default'
+    const eff = short && effort && String(effort).trim() && String(effort).toLowerCase() !== 'default'
         ? ' · ' + String(effort).trim()
         : '';
-    const label = short + eff;
-    const tip = effort ? `${model} (${effort})` : model;
-    return `<span class="hidden sm:inline-block shrink-0 max-w-[9rem] truncate text-[10px] font-mono px-1.5 py-0.5 rounded border border-zinc-200 dark:border-cc-line3 text-zinc-500 dark:text-cc-dim" title="${esc(tip)}">${esc(label)}</span>`;
+    const label = short ? short + eff : src;
+    const tip = [(s && s.sourceLabel) || src];
+    if (model && short) tip.push(effort ? `${model} (${effort})` : model);
+    return `<span class="inline-block shrink-0 max-w-[7rem] sm:max-w-[11rem] truncate text-[11px] font-mono font-medium px-1.5 py-0.5 rounded border ${colors}" title="${esc(tip.join(' · '))}">${esc(label)}</span>`;
 }
 
 /**
@@ -344,48 +362,39 @@ function longRunMode(s) {
     return longest * 1000 >= activeMs * 0.9 ? 'tint' : 'chip';
 }
 
-/** Compact weight label: active runtime and/or byte size, as plain text. */
-function sessionWeightLabel(s) {
-    if (!s) return '';
-    const parts = [];
-    const activeMs = sessionActiveMs(s);
-    if (activeMs) parts.push(formatDurationMs(activeMs));
-    if (s.size) parts.push(formatBytes(s.size));
-    return parts.join(' · ');
-}
-
-/** Weight column markup - tints the duration when it is one unbroken run. */
+/**
+ * Weight column markup: active runtime only. Byte size moved to the tooltip -
+ * it is almost never why a row gets clicked, and it was holding open the
+ * widest column on the right. Long-run signal rides the duration itself:
+ * tinted when the session was one unbroken run, dotted-underlined when a long
+ * stretch sits inside a longer broken session (the tooltip names it).
+ */
 function sessionWeightHtml(s) {
     if (!s) return '';
-    const parts = [];
     const activeMs = sessionActiveMs(s);
-    if (activeMs) {
-        const dur = esc(formatDurationMs(activeMs));
-        parts.push(longRunMode(s) === 'tint'
-            ? `<span class="text-indigo-500 dark:text-indigo-400">${dur}</span>`
-            : dur);
+    if (!activeMs) {
+        const longest = s.longest_active_seconds;
+        return longest ? esc(formatDurationMs(longest * 1000)) : '';
     }
-    if (s.size) parts.push(esc(formatBytes(s.size)));
-    return parts.join(' · ');
+    const dur = esc(formatDurationMs(activeMs));
+    const mode = longRunMode(s);
+    if (mode === 'tint') return `<span class="text-indigo-500 dark:text-indigo-400">${dur}</span>`;
+    if (mode === 'chip') return `<span class="underline decoration-dotted decoration-indigo-400/70 underline-offset-4">${dur}</span>`;
+    return dur;
 }
 
 function sessionWeightTitle(s) {
-    const base = sessionWeightLabel(s);
-    if (longRunMode(s) === 'tint') {
-        return base + ' - ran uninterrupted';
+    if (!s) return '';
+    const parts = [];
+    const activeMs = sessionActiveMs(s);
+    if (activeMs) parts.push(formatDurationMs(activeMs) + ' active');
+    const mode = longRunMode(s);
+    if (mode === 'tint') parts.push('ran uninterrupted');
+    else if (mode === 'chip' && s.longest_active_seconds) {
+        parts.push('longest stretch ' + formatDurationMs(s.longest_active_seconds * 1000));
     }
-    return base;
-}
-
-/**
- * Chip for a long uninterrupted stretch inside a session that was otherwise
- * broken up. Sessions that ran straight through get the tinted duration
- * instead, so the same number never appears twice on one row.
- */
-function longRunBadge(s) {
-    if (longRunMode(s) !== 'chip') return '';
-    const label = 'ran ' + formatDurationMs(s.longest_active_seconds * 1000);
-    return `<span class="hidden sm:inline-block shrink-0 text-[10px] font-mono px-1.5 py-0.5 rounded border border-indigo-300/70 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400" title="Longest uninterrupted active stretch">${esc(label)}</span>`;
+    if (s.size) parts.push(formatBytes(s.size));
+    return parts.join(' · ');
 }
 
 /** LOC chip from agent_lines_added / agent_lines_removed (Grok signals). */
@@ -1460,7 +1469,7 @@ function renderDashboard() {
             data-project="${esc(project || '')}" data-sid="${esc(id)}" data-source="${esc(source)}"${envAttr}${titleAttr} title="${esc(tip)}">${ICON_COPY}</button>`;
     }
 
-    function rowHtml(s) {
+    function rowHtml(s, showProject) {
         const title = s.display || s.id;
         const src = s.source || 'claude';
         const children = Array.isArray(s.children) ? s.children : [];
@@ -1479,16 +1488,15 @@ function renderDashboard() {
         <div class="session-row group flex items-center gap-2 sm:gap-3 px-4 py-2 cursor-pointer border-t border-zinc-100 dark:border-cc-line2 hover:bg-zinc-50 dark:hover:bg-cc-panel"
              data-session-id="${esc(s.id)}" data-source="${esc(src)}">
             ${chevron}
-            ${sourceBadge(src, s.sourceLabel)}
+            ${sourceDot(s)}
             <span class="flex-1 min-w-0 truncate text-sm text-zinc-800 dark:text-cc-ink" title="${esc(title)}">${esc(title)}</span>
             ${liveBadge(s)}
-            ${modelBadge(s.model, s.reasoning_effort)}
+            ${identityBadge(s)}
             ${agentNameBadge(s.agent_name)}
             ${countBadge}
-            ${longRunBadge(s)}
             ${retentionBadge(s, showRetentionBadges())}
-            <span class="hidden md:block max-w-[240px] truncate text-xs font-mono text-zinc-400 dark:text-cc-dim" title="${esc(shortPath(s.project) || '')}">${esc(projectLabel(s.project) || s.projectName || '')}</span>
-            <span class="hidden sm:block min-w-[5rem] max-w-[9rem] text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap truncate" title="${esc(sessionWeightTitle(s))}">${sessionWeightHtml(s)}</span>
+            ${showProject ? `<span class="hidden md:block max-w-[240px] truncate text-xs font-mono text-zinc-400 dark:text-cc-dim" title="${esc(shortPath(s.project) || '')}">${esc(projectLabel(s.project) || s.projectName || '')}</span>` : ''}
+            <span class="hidden sm:block min-w-[3.5rem] max-w-[6rem] text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap truncate" title="${esc(sessionWeightTitle(s))}">${sessionWeightHtml(s)}</span>
             <span class="text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap" style="width:4.5rem">${s.timestamp_s ? clockTime(s.timestamp_s) : ''}</span>
             ${copyBtnHtml(src, s.project, s.id, s.environmentId, s.display)}
         </div>`;
@@ -1561,15 +1569,25 @@ function renderDashboard() {
             dayCounts[key] = (dayCounts[key] || 0) + 1;
         });
 
+        // The project filter already names the project above the list, so
+        // repeating it on every row says nothing. Unfiltered, print it only
+        // when it changes: a visible label then means the context switched
+        // here. Each day block re-establishes its own context.
+        const projectColumn = !activeProject;
         let html = dayBanner;
         let lastDay = null;
+        let lastProject = null;
         slice.forEach(s => {
             const key = s.timestamp_s ? new Date(s.timestamp_s * 1000).toDateString() : 'undated';
             if (key !== lastDay) {
                 lastDay = key;
+                lastProject = null;
                 html += dayHeaderHtml(s.timestamp_s ? dayLabel(s.timestamp_s) : 'Undated', dayCounts[key]);
             }
-            html += rowHtml(s);
+            const proj = s.project || s.projectName || '';
+            const showProject = projectColumn && !!proj && proj !== lastProject;
+            if (proj) lastProject = proj;
+            html += rowHtml(s, showProject);
         });
 
         if (list.length > shown) {
