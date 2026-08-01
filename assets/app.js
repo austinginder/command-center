@@ -326,7 +326,25 @@ function formatActiveSeconds(sec) {
     return (h >= 100 ? Math.round(h) : +h.toFixed(1)) + 'h';
 }
 
-/** Compact weight label: active runtime and/or byte size for list rows. */
+const LONG_RUN_SECONDS = 1800;
+
+/**
+ * How to present a long uninterrupted stretch on a list row, without ever
+ * printing the same number twice:
+ *   'tint' - the stretch is essentially the whole session, so the active time
+ *            already in the weight column IS the unbroken run; just tint it.
+ *   'chip' - the session was broken up, so the longest stretch is a different
+ *            (smaller) number worth showing on its own.
+ */
+function longRunMode(s) {
+    const longest = s && s.longest_active_seconds;
+    if (!longest || longest < LONG_RUN_SECONDS) return '';
+    const activeMs = sessionActiveMs(s);
+    if (!activeMs) return 'chip';
+    return longest * 1000 >= activeMs * 0.9 ? 'tint' : 'chip';
+}
+
+/** Compact weight label: active runtime and/or byte size, as plain text. */
 function sessionWeightLabel(s) {
     if (!s) return '';
     const parts = [];
@@ -336,13 +354,36 @@ function sessionWeightLabel(s) {
     return parts.join(' · ');
 }
 
+/** Weight column markup - tints the duration when it is one unbroken run. */
+function sessionWeightHtml(s) {
+    if (!s) return '';
+    const parts = [];
+    const activeMs = sessionActiveMs(s);
+    if (activeMs) {
+        const dur = esc(formatDurationMs(activeMs));
+        parts.push(longRunMode(s) === 'tint'
+            ? `<span class="text-indigo-500 dark:text-indigo-400">${dur}</span>`
+            : dur);
+    }
+    if (s.size) parts.push(esc(formatBytes(s.size)));
+    return parts.join(' · ');
+}
+
+function sessionWeightTitle(s) {
+    const base = sessionWeightLabel(s);
+    if (longRunMode(s) === 'tint') {
+        return base + ' - ran uninterrupted';
+    }
+    return base;
+}
+
 /**
- * Chip for sessions with a long uninterrupted stretch - the "agent ran for an
- * hour straight" signal. Only shown from 30 minutes up so routine back-and-forth
- * sessions stay quiet.
+ * Chip for a long uninterrupted stretch inside a session that was otherwise
+ * broken up. Sessions that ran straight through get the tinted duration
+ * instead, so the same number never appears twice on one row.
  */
 function longRunBadge(s) {
-    if (!s || !s.longest_active_seconds || s.longest_active_seconds < 1800) return '';
+    if (longRunMode(s) !== 'chip') return '';
     const label = 'ran ' + formatDurationMs(s.longest_active_seconds * 1000);
     return `<span class="hidden sm:inline-block shrink-0 text-[10px] font-mono px-1.5 py-0.5 rounded border border-indigo-300/70 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400" title="Longest uninterrupted active stretch">${esc(label)}</span>`;
 }
@@ -1447,7 +1488,7 @@ function renderDashboard() {
             ${longRunBadge(s)}
             ${retentionBadge(s, showRetentionBadges())}
             <span class="hidden md:block max-w-[240px] truncate text-xs font-mono text-zinc-400 dark:text-cc-dim" title="${esc(shortPath(s.project) || '')}">${esc(projectLabel(s.project) || s.projectName || '')}</span>
-            <span class="hidden sm:block min-w-[5rem] max-w-[9rem] text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap truncate" title="${esc(sessionWeightLabel(s))}">${esc(sessionWeightLabel(s))}</span>
+            <span class="hidden sm:block min-w-[5rem] max-w-[9rem] text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap truncate" title="${esc(sessionWeightTitle(s))}">${sessionWeightHtml(s)}</span>
             <span class="text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap" style="width:4.5rem">${s.timestamp_s ? clockTime(s.timestamp_s) : ''}</span>
             ${copyBtnHtml(src, s.project, s.id, s.environmentId, s.display)}
         </div>`;
@@ -2356,7 +2397,13 @@ function renderSessionView(sessionId) {
                 }
                 if (s.active_seconds > 0) parts.push(formatDurationMs(s.active_seconds * 1000) + ' active');
                 else if (s.duration_ms != null && s.duration_ms > 0) parts.push(formatDurationMs(s.duration_ms));
-                if (s.longest_active_seconds >= 300) parts.push('longest stretch ' + formatDurationMs(s.longest_active_seconds * 1000));
+                // Only when it differs from the active total - an unbroken
+                // session would otherwise print the same figure twice.
+                if (s.longest_active_seconds >= 300 && s.longest_active_seconds * 1000 < s.active_seconds * 1000 * 0.9) {
+                    parts.push('longest stretch ' + formatDurationMs(s.longest_active_seconds * 1000));
+                } else if (s.longest_active_seconds >= LONG_RUN_SECONDS) {
+                    parts.push('ran uninterrupted');
+                }
                 if (s.turn_count) parts.push(s.turn_count + (s.turn_count === 1 ? ' turn' : ' turns'));
                 if (s.message_count) parts.push(s.message_count + (s.message_count === 1 ? ' msg' : ' msgs'));
                 if (s.tool_calls != null) parts.push(s.tool_calls + (s.tool_calls === 1 ? ' tool' : ' tools'));
