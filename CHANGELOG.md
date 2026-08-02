@@ -2,7 +2,7 @@
 
 All notable changes to Command Center are documented here.
 
-## Unreleased
+## [1.8.0] - 2026-08-02
 
 ### Added
 
