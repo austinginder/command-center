@@ -175,7 +175,78 @@ class SessionRegistry {
 	 * List sessions across providers, tagged with source.
 	 * Pass $source to restrict to one provider.
 	 */
-	public static function listSessions( ?string $project = null, ?string $source = null ): array {
+	/**
+	 * Seconds a built list stays servable. A dashboard load fires five endpoints
+	 * at once and each one used to walk every provider's transcript directory
+	 * independently, so the same scan ran five times concurrently and the copies
+	 * fought each other for disk. They now share one walk. This has to comfortably
+	 * exceed how long a walk takes, or the entry expires before anything can reuse
+	 * it and the cache does nothing but add a lock.
+	 */
+	private const LIST_CACHE_SECONDS = 90;
+
+	/**
+	 * Run $build once and share the result with everything that asks for the
+	 * same $key in the next LIST_CACHE_SECONDS. Concurrent callers serialise on
+	 * a lock file: the first walks the providers, the rest wait and then read
+	 * what it wrote instead of running more copies of the same scan.
+	 */
+	private static function cachedList( string $key, bool $fresh, callable $build ): array {
+		static $memo = [];
+		if ( ! $fresh && isset( $memo[ $key ] ) ) {
+			return $memo[ $key ];
+		}
+
+		$file = null;
+		$lock = null;
+		if ( defined( 'DATA_DIR' ) ) {
+			$dir = DATA_DIR . '/list-cache';
+			if ( is_dir( $dir ) || @mkdir( $dir, 0700, true ) ) {
+				$file = $dir . '/' . $key . '.json';
+				$lock = @fopen( $file . '.lock', 'c' );
+				if ( $lock ) {
+					@flock( $lock, LOCK_EX );
+				}
+			}
+		}
+
+		if ( ! $fresh && $file !== null && is_file( $file )
+			&& ( time() - (int) @filemtime( $file ) ) < self::LIST_CACHE_SECONDS ) {
+			$cached = json_decode( (string) @file_get_contents( $file ), true );
+			if ( is_array( $cached ) ) {
+				self::releaseLock( $lock );
+				$memo[ $key ] = $cached;
+				return $cached;
+			}
+		}
+
+		$results = $build();
+
+		if ( $file !== null ) {
+			@file_put_contents( $file, json_encode( $results, JSON_UNESCAPED_SLASHES ), LOCK_EX );
+		}
+		self::releaseLock( $lock );
+		$memo[ $key ] = $results;
+		return $results;
+	}
+
+	private static function releaseLock( $lock ): void {
+		if ( $lock ) {
+			@flock( $lock, LOCK_UN );
+			@fclose( $lock );
+		}
+	}
+
+	/**
+	 * Assemble the cross-provider session list, reusing a recent build when one
+	 * is available. Pass $fresh to force a walk (explicit rebuilds only).
+	 */
+	public static function listSessions( ?string $project = null, ?string $source = null, bool $fresh = false ): array {
+		$key = 's-' . sha1( ( $project ?? '' ) . "\0" . ( $source ?? '' ) );
+		return self::cachedList( $key, $fresh, fn() => self::buildSessionList( $project, $source ) );
+	}
+
+	private static function buildSessionList( ?string $project, ?string $source ): array {
 		$results = [];
 		foreach ( self::providers() as $id => $class ) {
 			if ( $source && $source !== $id ) {
@@ -201,7 +272,12 @@ class SessionRegistry {
 	 * List unique projects across providers.
 	 * Duplicate paths are merged, with 'sources' tracking which providers have data.
 	 */
-	public static function listProjects( ?string $source = null ): array {
+	public static function listProjects( ?string $source = null, bool $fresh = false ): array {
+		$key = 'p-' . sha1( $source ?? '' );
+		return self::cachedList( $key, $fresh, fn() => self::buildProjectList( $source ) );
+	}
+
+	private static function buildProjectList( ?string $source ): array {
 		$byPath = [];
 		foreach ( self::providers() as $id => $class ) {
 			if ( $source && $source !== $id ) {

@@ -137,7 +137,8 @@ if ( $method === 'PUT' && $path === '/retention/preferences' ) {
 if ( $method === 'POST' && $path === '/sessions/search/reindex' ) {
 	set_time_limit( 120 );
 	require_once BASE_DIR . '/app/SearchIndex.php';
-	$sessions = SessionRegistry::listSessions();
+	// Explicit rebuild - walk the providers rather than trusting a recent list.
+	$sessions = SessionRegistry::listSessions( null, null, true );
 	echo json_encode( SearchIndex::rebuild( $sessions ) );
 	exit;
 }
@@ -152,7 +153,7 @@ if ( $method === 'GET' && $path === '/sessions/stats/daily' ) {
 	// Skipped when the backlog is large (first run) - the reindex button covers that.
 	set_time_limit( 60 );
 	$sessions = SessionRegistry::listSessions( $project ?: null, $source ?: null );
-	$stale    = SearchIndex::getStaleSessions( $sessions );
+	$stale    = SearchIndex::filterSettled( SearchIndex::getStaleSessions( $sessions ) );
 	if ( ! empty( $stale ) && count( $stale ) <= 50 ) {
 		SearchIndex::indexSessions( $stale );
 	}

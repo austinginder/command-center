@@ -120,6 +120,28 @@ class SearchIndex {
 	 * @param array $sessions Tagged session list from SessionRegistry::listSessions().
 	 * @return array Sessions needing index updates (with _mtime, _size attached).
 	 */
+	/**
+	 * How long a transcript must sit untouched before the opportunistic pass on
+	 * dashboard load will index it.
+	 */
+	public const SETTLE_SECONDS = 300;
+
+	/**
+	 * Drop sessions that are still being written to. A live transcript goes
+	 * stale again seconds after it is indexed, so re-reading it on every
+	 * dashboard load costs the whole file and buys nothing - and the cost grows
+	 * with the session, which is what made a long working day slower and slower.
+	 * They index once the tool goes quiet, and an explicit reindex or a deep
+	 * search still picks them up immediately.
+	 */
+	public static function filterSettled( array $sessions, ?int $now = null ): array {
+		$cutoff = ( $now ?? time() ) - self::SETTLE_SECONDS;
+		return array_values( array_filter( $sessions, static function ( $s ) use ( $cutoff ) {
+			$touched = (int) ( $s['_mtime'] ?? $s['timestamp_s'] ?? 0 );
+			return $touched === 0 || $touched <= $cutoff;
+		} ) );
+	}
+
 	public static function getStaleSessions( array $sessions ): array {
 		$db    = self::db();
 		$stale = [];
