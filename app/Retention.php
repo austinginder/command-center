@@ -29,6 +29,7 @@ class Retention {
 			'commandcode' => [ 'kind' => 'none', 'note' => 'No known auto-delete' ],
 			't3code'      => [ 'kind' => 'none', 'note' => 'No known auto-delete' ],
 			'antigravity' => [ 'kind' => 'none', 'note' => 'No known auto-delete (distinct from Gemini CLI retention)' ],
+			'grokbot'     => [ 'kind' => 'none', 'note' => 'Local replica stays until the app removes the chat' ],
 		];
 	}
 

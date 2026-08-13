@@ -46,6 +46,7 @@ class SessionRegistry {
 			'antigravity' => 'AntigravitySessions',
 			'gemini'      => 'GeminiSessions',
 			'grok'        => 'GrokSessions',
+			'grokbot'     => 'GrokBotSessions',
 			'codex'       => 'CodexSessions',
 		];
 	}
@@ -380,6 +381,7 @@ class SessionRegistry {
 				return 'measured';
 			case 'commandcode':
 			case 't3code':
+			case 'grokbot':
 				return 'estimated';
 			default:
 				return 'none';
@@ -402,7 +404,7 @@ class SessionRegistry {
 	/**
 	 * Total token usage for a session, or null when the provider doesn't
 	 * track it. Measured for Claude Code, OpenCode, Kimi, Amp, Gemini, Codex,
-	 * Grok Build (see usageType()); estimated for Command Code and T3 Code;
+	 * Grok Build (see usageType()); estimated for Command Code, T3 Code, and Grok Bot;
 	 * Antigravity has nothing.
 	 */
 	public static function extractUsage( array $session ): ?array {
@@ -464,7 +466,7 @@ class SessionRegistry {
 			// Fall back to Claude's legacy grep path - non-Claude providers have no
 			// equivalent, so they return empty when FTS is broken rather than
 			// surfacing Claude results under the wrong source.
-			if ( in_array( $source, [ 'amp', 't3code', 'kimi', 'opencode', 'antigravity', 'grok' ], true ) ) {
+			if ( in_array( $source, [ 'amp', 't3code', 'kimi', 'opencode', 'antigravity', 'grok', 'grokbot' ], true ) ) {
 				return [];
 			}
 			return ClaudeSessions::deepSearch( $query, $project );

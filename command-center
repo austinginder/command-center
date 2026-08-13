@@ -42,6 +42,7 @@ require BASE_DIR . '/app/KimiSessions.php';
 require BASE_DIR . '/app/AntigravitySessions.php';
 require BASE_DIR . '/app/GeminiSessions.php';
 require BASE_DIR . '/app/GrokSessions.php';
+require BASE_DIR . '/app/GrokBotSessions.php';
 require BASE_DIR . '/app/CodexSessions.php';
 require BASE_DIR . '/app/SessionRegistry.php';
 require BASE_DIR . '/app/Retention.php';
@@ -685,6 +686,8 @@ function resolveAgent( ?string $input ): ?string {
 		'grokcode'      => 'grok',
 		'grok-build'    => 'grok',
 		'grokbuild'     => 'grok',
+		'grokbot'       => 'grokbot',
+		'grok-bot'      => 'grokbot',
 	];
 
 	$key = strtolower( str_replace( [ ' ', '_' ], '-', $input ) );
@@ -703,7 +706,7 @@ function resolveAgent( ?string $input ): ?string {
 	}
 
 	fwrite( STDERR, "Unknown agent: {$input}\n" );
-	fwrite( STDERR, "Available: amp, claude (Claude Code), commandcode (Command Code), t3code (T3 Code), opencode (OpenCode), kimi (Kimi), antigravity (Antigravity), grok (Grok Build)\n" );
+	fwrite( STDERR, "Available: amp, claude (Claude Code), commandcode (Command Code), t3code (T3 Code), opencode (OpenCode), kimi (Kimi), antigravity (Antigravity), grok (Grok Build), grokbot (Grok Bot)\n" );
 	exit( 2 );
 }
 
@@ -795,6 +798,7 @@ Available agents:
   kimi                    Kimi
   antigravity, agy        Antigravity
   grok, grok-code, grok-build   Grok Build
+  grokbot, grok-bot       Grok Bot
 
 Examples:
   command-center "error handling"

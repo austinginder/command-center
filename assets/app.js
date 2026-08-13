@@ -200,6 +200,7 @@ const SOURCE_COLORS = {
     gemini:      'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20',
     kimi:        'bg-pink-500/10 text-pink-500 border-pink-500/20',
     grok:        'bg-amber-500/10 text-amber-500 border-amber-500/20',
+    grokbot:     'bg-rose-500/10 text-rose-500 border-rose-500/20',
     codex:       'bg-teal-500/10 text-teal-700 dark:text-teal-400 border-teal-500/20',
 };
 
@@ -213,6 +214,7 @@ const SOURCE_DOTS = {
     gemini:      'bg-sky-500',
     kimi:        'bg-pink-500',
     grok:        'bg-amber-500',
+    grokbot:     'bg-rose-500',
     codex:       'bg-teal-500',
 };
 
@@ -439,7 +441,20 @@ const RESUME_BINS = {
     t3code:      { kind: 't3-open-app', bundleId: 'com.t3tools.t3code' },
     // Codex desktop (ChatGPT.app) is com.openai.codex - no stable CLI resume yet.
     codex:       { kind: 't3-open-app', bundleId: 'com.openai.codex' },
+    // Grok Bot (com.anysphere.sand). sand://app/v1/open has no agent id.
+    grokbot:     { kind: 't3-open-app', bundleId: 'com.anysphere.sand' },
 };
+
+function resumeCopyTip(source) {
+    const cfg = RESUME_BINS[source];
+    if (cfg && cfg.kind === 't3-open-app') {
+        if (source === 't3code') return 'Open T3 Code (pick thread in sidebar)';
+        if (source === 'codex') return 'Open Codex / ChatGPT (find thread in app)';
+        if (source === 'grokbot') return 'Open Grok Bot (pick chat in sidebar)';
+        return 'Open the desktop app';
+    }
+    return 'Copy CLI resume command';
+}
 
 function resumeCommand(source, project, sessionId, environmentId, display) {
     const cfg = RESUME_BINS[source];
@@ -1468,9 +1483,7 @@ function renderDashboard() {
         if (!RESUME_BINS[source]) return '<span class="w-[26px] shrink-0"></span>';
         const envAttr = environmentId ? ` data-env="${esc(environmentId)}"` : '';
         const titleAttr = display ? ` data-display="${esc(display)}"` : '';
-        const tip = source === 't3code'
-            ? 'Open T3 Code (pick thread in sidebar)'
-            : 'Copy CLI resume command';
+        const tip = resumeCopyTip(source);
         return `<button class="copy-resume-btn shrink-0 p-1 rounded text-zinc-300 dark:text-cc-dim opacity-0 group-hover:opacity-100 hover:!text-blue-500 transition-all"
             data-project="${esc(project || '')}" data-sid="${esc(id)}" data-source="${esc(source)}"${envAttr}${titleAttr} title="${esc(tip)}">${ICON_COPY}</button>`;
     }
@@ -2480,12 +2493,7 @@ function renderSessionView(sessionId) {
             const btn = document.getElementById('session-copy-resume-btn');
             if (cmd && btn) {
                 btn.classList.remove('hidden');
-                if (s.source === 't3code') {
-                    btn.title = 'Open T3 Code (pick thread in sidebar)';
-                }
-                if (s.source === 'codex') {
-                    btn.title = 'Open Codex / ChatGPT (find thread in app)';
-                }
+                btn.title = resumeCopyTip(s.source);
                 btn.addEventListener('click', () => copyWithFlash(btn, cmd, '.resume-icon'));
             }
         })
@@ -2815,6 +2823,7 @@ const SOURCE_HEX = {
     gemini:      '#0ea5e9',
     kimi:        '#ec4899',
     grok:        '#f59e0b',
+    grokbot:     '#f43f5e',
     codex:       '#14b8a6',
 };
 

@@ -2,6 +2,12 @@
 
 All notable changes to Command Center are documented here.
 
+## [Unreleased]
+
+### Added
+
+- **Grok Bot provider** - indexes desktop Grok Bot chats from the local `sand-client-persistence` replicas (`~/Library/Application Support/Grok Bot`). One row per sidebar agent (Hunter, MoeBot, ...). Token usage is estimated. Resume opens the Mac app (`com.anysphere.sand`); there is no per-chat deep link.
+
 ## [1.8.0] - 2026-08-02
 
 ### Added
