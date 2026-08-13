@@ -200,7 +200,7 @@ const SOURCE_COLORS = {
     gemini:      'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20',
     kimi:        'bg-pink-500/10 text-pink-500 border-pink-500/20',
     grok:        'bg-amber-500/10 text-amber-500 border-amber-500/20',
-    grokbot:     'bg-rose-500/10 text-rose-500 border-rose-500/20',
+    grokbot:     'bg-zinc-500/10 text-zinc-800 dark:text-zinc-200 border-zinc-500/25',
     codex:       'bg-teal-500/10 text-teal-700 dark:text-teal-400 border-teal-500/20',
 };
 
@@ -214,7 +214,7 @@ const SOURCE_DOTS = {
     gemini:      'bg-sky-500',
     kimi:        'bg-pink-500',
     grok:        'bg-amber-500',
-    grokbot:     'bg-rose-500',
+    grokbot:     'bg-zinc-800 dark:bg-zinc-300',
     codex:       'bg-teal-500',
 };
 
@@ -2823,7 +2823,7 @@ const SOURCE_HEX = {
     gemini:      '#0ea5e9',
     kimi:        '#ec4899',
     grok:        '#f59e0b',
-    grokbot:     '#f43f5e',
+    grokbot:     '#27272a',
     codex:       '#14b8a6',
 };
 
