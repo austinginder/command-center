@@ -229,6 +229,40 @@ details.tool-group[open] > summary .tool-group-label::before { content: '▾ '; 
     background: rgba(245, 158, 11, 0.12) !important;
 }
 
+/* ─── Theme menu (right-click on the sun/moon control) ──────── */
+#theme-menu {
+    position: fixed;
+    z-index: 50;
+    min-width: 8.5rem;
+    padding: 0.25rem;
+    border-radius: 0.5rem;
+    border: 1px solid #e4e4e7;
+    background: #fff;
+    box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+}
+.dark #theme-menu {
+    border-color: #24312a;
+    background: #0c110e;
+}
+#theme-menu button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    padding: 0.375rem 0.625rem;
+    border-radius: 0.375rem;
+    color: #3f3f46;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+}
+.dark #theme-menu button { color: #e8ece9; }
+#theme-menu button:hover { background: #f4f4f5; }
+.dark #theme-menu button:hover { background: #1a231e; }
+#theme-menu button.is-on { color: #059669; font-weight: 600; }
+.dark #theme-menu button.is-on { color: #34d399; }
+
 /* ─── Focus Rings ──────────────────────────────────────────── */
 input:focus, select:focus {
     outline: none;

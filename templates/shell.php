@@ -54,10 +54,37 @@ $assetVer = function ( string $path ): string {
     }</script>
     <script>
     (function() {
-        var t = localStorage.getItem('theme');
-        if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-            document.documentElement.classList.add('dark');
+        function osDark() {
+            try {
+                return window.matchMedia('(prefers-color-scheme: dark)').matches;
+            } catch (e) {
+                return true;
+            }
         }
+        function apply(pref) {
+            var dark = pref === 'dark' || (pref !== 'light' && osDark());
+            document.documentElement.classList.toggle('dark', dark);
+        }
+        var t;
+        try {
+            t = localStorage.getItem('theme');
+            if (t !== 'light' && t !== 'dark' && t !== 'system') {
+                t = 'system';
+                localStorage.setItem('theme', 'system');
+            }
+        } catch (e) {
+            t = 'system';
+        }
+        apply(t);
+        try {
+            if (window.matchMedia) {
+                window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () {
+                    var cur;
+                    try { cur = localStorage.getItem('theme'); } catch (e2) { cur = 'system'; }
+                    if (cur === 'system' || !cur) apply('system');
+                });
+            }
+        } catch (e) {}
     })();
     </script>
     <!-- Marked.js -->
@@ -106,9 +133,10 @@ $assetVer = function ( string $path ): string {
                     <div id="update-panel-msg" class="hidden text-[11px] font-mono text-zinc-500 dark:text-cc-dim"></div>
                 </div>
             </div>
-            <button id="dark-toggle" type="button" class="text-zinc-400 dark:text-cc-dim hover:text-zinc-600 dark:hover:text-cc-mut p-1 rounded transition-colors" title="Toggle dark mode">
-                <svg id="icon-moon" class="w-3.5 h-3.5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
-                <svg id="icon-sun" class="w-3.5 h-3.5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+            <button id="dark-toggle" type="button" class="text-zinc-400 dark:text-cc-dim hover:text-zinc-600 dark:hover:text-cc-mut p-1 rounded transition-colors" title="Theme: System (click to switch light and dark, right-click for options)" aria-label="Color theme" aria-haspopup="menu" aria-expanded="false">
+                <svg id="icon-moon" class="w-3.5 h-3.5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
+                <svg id="icon-sun" class="w-3.5 h-3.5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+                <svg id="icon-system" class="w-3.5 h-3.5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke-width="2"/><path d="M12 3a9 9 0 010 18z" fill="currentColor" stroke="none"/></svg>
             </button>
         </div>
     </div>

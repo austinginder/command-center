@@ -11,6 +11,7 @@ All notable changes to Command Center are documented here.
 ### Improved
 
 - **Grok Bot source colour** - zinc/charcoal to match the silver-and-black app icon, instead of rose.
+- **Theme follows the system** - right-click the sun/moon control for System, Light, or Dark. Click still flips light and dark. System tracks the OS setting live. The icon shows the saved preference (half-circle for System) so a dark OS is not mistaken for a Dark lock.
 
 ## [1.8.0] - 2026-08-02
 

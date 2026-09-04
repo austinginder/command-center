@@ -3232,20 +3232,136 @@ async function exportSessionHtml(btn, sessionId, session) {
 }
 
 // ─── Init ────────────────────────────────────────────────────
-// Dark mode toggle.
-document.getElementById('dark-toggle').addEventListener('click', () => {
-    const html = document.documentElement;
-    html.classList.toggle('dark');
-    localStorage.setItem('theme', html.classList.contains('dark') ? 'dark' : 'light');
-    updateDarkIcons();
-});
-
-function updateDarkIcons() {
-    const isDark = document.documentElement.classList.contains('dark');
-    document.getElementById('icon-moon').classList.toggle('hidden', isDark);
-    document.getElementById('icon-sun').classList.toggle('hidden', !isDark);
+// Theme: click is light <-> dark. Right-click picks System / Light / Dark.
+// Icon shows the saved preference (System = half-circle), not only the paint.
+function themePref() {
+    try {
+        const t = localStorage.getItem('theme');
+        if (t === 'light' || t === 'dark' || t === 'system') return t;
+    } catch (e) { /* private mode */ }
+    return 'system';
 }
-updateDarkIcons();
+
+function osTheme() {
+    try {
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            return 'dark';
+        }
+    } catch (e) { /* matchMedia unavailable */ }
+    return 'light';
+}
+
+function setThemePref(pref) {
+    const mode = (pref === 'light' || pref === 'dark') ? pref : 'system';
+    try { localStorage.setItem('theme', mode); } catch (e) { /* private mode */ }
+    const dark = (mode === 'system' ? osTheme() : mode) === 'dark';
+    document.documentElement.classList.toggle('dark', dark);
+    updateThemeBtn();
+}
+
+function updateThemeBtn() {
+    const pref = themePref();
+    const sun = document.getElementById('icon-sun');
+    const moon = document.getElementById('icon-moon');
+    const sys = document.getElementById('icon-system');
+    if (sun) sun.classList.toggle('hidden', pref !== 'light');
+    if (moon) moon.classList.toggle('hidden', pref !== 'dark');
+    if (sys) sys.classList.toggle('hidden', pref !== 'system');
+    const btn = document.getElementById('dark-toggle');
+    if (!btn) return;
+    const label = pref === 'system' ? 'System' : (pref === 'light' ? 'Light' : 'Dark');
+    btn.title = 'Theme: ' + label + ' (click to switch light and dark, right-click for options)';
+    btn.setAttribute('aria-label', 'Color theme: ' + label);
+}
+
+function toggleTheme() {
+    // From System, lock the opposite of whatever the OS is showing now.
+    const now = themePref() === 'system' ? osTheme() : themePref();
+    setThemePref(now === 'light' ? 'dark' : 'light');
+}
+
+function closeThemeMenu() {
+    const menu = document.getElementById('theme-menu');
+    if (menu) menu.remove();
+    const btn = document.getElementById('dark-toggle');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('mousedown', onThemeMenuAway, true);
+    document.removeEventListener('keydown', onThemeMenuKey, true);
+    window.removeEventListener('scroll', closeThemeMenu, true);
+    window.removeEventListener('resize', closeThemeMenu);
+}
+
+function onThemeMenuAway(e) {
+    const menu = document.getElementById('theme-menu');
+    if (!menu || menu.contains(e.target)) return;
+    closeThemeMenu();
+}
+
+function onThemeMenuKey(e) {
+    if (e.key === 'Escape') closeThemeMenu();
+}
+
+function openThemeMenu(x, y) {
+    closeThemeMenu();
+    const panel = document.getElementById('update-panel');
+    const vBtn = document.getElementById('version-btn');
+    if (panel) panel.classList.add('hidden');
+    if (vBtn) vBtn.setAttribute('aria-expanded', 'false');
+
+    const cur = themePref();
+    const menu = document.createElement('div');
+    menu.id = 'theme-menu';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', 'Color theme');
+    [
+        { id: 'system', label: 'System' },
+        { id: 'light', label: 'Light' },
+        { id: 'dark', label: 'Dark' },
+    ].forEach(o => {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.setAttribute('role', 'menuitem');
+        item.dataset.themePref = o.id;
+        item.textContent = (cur === o.id ? '✓ ' : '') + o.label;
+        if (cur === o.id) item.classList.add('is-on');
+        item.addEventListener('click', () => {
+            setThemePref(o.id);
+            closeThemeMenu();
+        });
+        menu.appendChild(item);
+    });
+    document.body.appendChild(menu);
+    const pad = 8;
+    let left = x;
+    let top = y;
+    const r = menu.getBoundingClientRect();
+    if (left + r.width > window.innerWidth - pad) left = Math.max(pad, window.innerWidth - r.width - pad);
+    if (top + r.height > window.innerHeight - pad) top = Math.max(pad, window.innerHeight - r.height - pad);
+    menu.style.left = left + 'px';
+    menu.style.top = top + 'px';
+
+    const btn = document.getElementById('dark-toggle');
+    if (btn) btn.setAttribute('aria-expanded', 'true');
+    document.addEventListener('mousedown', onThemeMenuAway, true);
+    document.addEventListener('keydown', onThemeMenuKey, true);
+    window.addEventListener('scroll', closeThemeMenu, true);
+    window.addEventListener('resize', closeThemeMenu);
+}
+
+document.getElementById('dark-toggle').addEventListener('click', toggleTheme);
+document.getElementById('dark-toggle').addEventListener('contextmenu', e => {
+    e.preventDefault();
+    openThemeMenu(e.clientX, e.clientY);
+});
+try {
+    if (window.matchMedia) {
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+            if (themePref() !== 'system') return;
+            setThemePref('system');
+        });
+    }
+} catch (e) { /* matchMedia unavailable */ }
+updateThemeBtn();
 
 ensureUpdatePanelWired();
 loadLocalVersion();
