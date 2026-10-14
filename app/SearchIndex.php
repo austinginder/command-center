@@ -273,7 +273,7 @@ class SearchIndex {
 		}
 
 		$sql = "
-			SELECT sf.session_id, sf.source, sf.project, sf.project_name, sf.display, sf.timestamp_ms, sf.file_size,
+			SELECT sf.session_id, sf.source, sf.project, sf.project_name, sf.display, sf.timestamp_ms, sf.file_size, sf.file_path,
 			       snippet(sessions_fts, 2, '<mark>', '</mark>', '...', 20) AS snippet
 			FROM sessions_fts
 			JOIN session_files sf
@@ -322,6 +322,9 @@ class SearchIndex {
 				'source'      => $src,
 				'sourceLabel' => $label,
 			];
+			if ( $src === 'claude' && ! empty( $row['file_path'] ) ) {
+				$results[ count( $results ) - 1 ] += ClaudeSessions::accountFields( ClaudeSessions::homeForFile( $row['file_path'] ) );
+			}
 		}
 
 		return $results;

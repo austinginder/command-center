@@ -11,7 +11,7 @@ If you bounce between AI coding CLIs, your conversation history ends up scattere
 | Tool | Reads from | Token usage |
 |---|---|---|
 | Amp | Local snapshots + `amp threads` | ✅ |
-| Claude Code | `~/.claude` | ✅ |
+| Claude Code | `~/.claude` plus any `~/.claude-*` account dirs | ✅ |
 | OpenCode | `$XDG_DATA_HOME/opencode` | ✅ |
 | Kimi CLI | `~/.kimi` | ✅ |
 | Command Code | `~/.commandcode` | estimated |
@@ -23,6 +23,8 @@ If you bounce between AI coding CLIs, your conversation history ends up scattere
 | Codex | `~/.codex` (ChatGPT / VS Code Codex) | ✅ |
 
 Tools you don't use are skipped automatically. Each location can be overridden with an env var (`AMP_HOME`, `CLAUDE_HOME`, `OPENCODE_HOME`, `KIMI_HOME`, `COMMANDCODE_HOME`, `T3CODE_HOME`, `ANTIGRAVITY_HOME`, `GEMINI_HOME`, `GROK_HOME`, `GROKBOT_HOME`, `CODEX_HOME`).
+
+**Multiple Claude Code accounts.** If you run a second account through `CLAUDE_CONFIG_DIR` (say `alias claude-work='CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude'`), every `~/.claude-*` directory holding a `history.jsonl` or `projects/` is indexed alongside `~/.claude`. Sessions from those accounts carry an `@work` tag, their resume command sets the matching `CLAUDE_CONFIG_DIR`, and the retention monitor reads each account's own `cleanupPeriodDays`. To pick the directories yourself, set `CLAUDE_HOMES` to a colon-separated list (the first entry is the primary account).
 
 ## Features
 

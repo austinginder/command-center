@@ -197,8 +197,9 @@ function cmdSearch( string $query, array $flags, int $limit, bool $useJson, bool
 		$timeAgo  = dim( str_pad( Helpers::timeAgo( $r['timestamp_s'] ), 8 ), $useColor );
 		$display  = bold( $r['display'] ?: $r['id'], $useColor );
 		$snippet  = formatSnippet( $r['snippet'] ?? '', $useColor );
+		$account  = ! empty( $r['account'] ) ? '  ' . dim( '@' . $r['account'], $useColor ) : '';
 
-		echo "  {$project} {$timeAgo} {$display}\n";
+		echo "  {$project} {$timeAgo} {$display}{$account}\n";
 		if ( $snippet ) {
 			echo "  {$snippet}\n";
 		}
@@ -274,7 +275,8 @@ function cmdSessions( array $flags, bool $useJson, bool $useColor, ?string $sour
 		$timeAgo = dim( str_pad( Helpers::timeAgo( $s['timestamp_s'] ), 8 ), $useColor );
 		$display = $s['display'] ?: $s['id'];
 		$size    = dim( Helpers::formatBytes( $s['size'] ), $useColor );
-		echo "  {$project} {$timeAgo} {$display}  {$size}\n";
+		$account = ! empty( $s['account'] ) ? dim( '@' . $s['account'], $useColor ) . '  ' : '';
+		echo "  {$project} {$timeAgo} {$display}  {$account}{$size}\n";
 	}
 
 	echo "\n" . dim( count( $sessions ) . " sessions.\n", $useColor );

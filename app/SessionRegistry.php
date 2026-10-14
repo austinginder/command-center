@@ -25,6 +25,8 @@
  *
  * Session record shape (all providers):
  *   id, display, timestamp (ms), timestamp_s, project (path), projectName, size, source, sourceLabel
+ * Optional: account + config_dir on Claude Code sessions from a non-primary
+ *   config dir (CLAUDE_CONFIG_DIR accounts, see ClaudeSessions::homes()).
  *
  * Project record shape:
  *   path, name, sessions (count), latest (ms), sources[] (added by registry when aggregating)

@@ -11,54 +11,67 @@
  */
 class FlowExtractor {
 
-	private static ?string $claudeDir = null;
-
 	/**
-	 * Resolve the Claude Code home directory (env override → ~/.claude).
+	 * projects/ dir of every Claude Code account (see ClaudeSessions::homes()).
+	 *
+	 * @return string[]
 	 */
-	private static function claudeDir(): string {
-		if ( self::$claudeDir === null ) {
-			$override = getenv( 'CLAUDE_HOME' );
-			$home     = getenv( 'HOME' ) ?: ( $_SERVER['HOME'] ?? '' );
-			self::$claudeDir = $override ?: $home . '/.claude';
+	private static function projectsDirs(): array {
+		$out = [];
+		foreach ( ClaudeSessions::homes() as $h ) {
+			if ( is_dir( $h['dir'] . '/projects' ) ) {
+				$out[] = $h['dir'] . '/projects';
+			}
 		}
-		return self::$claudeDir;
+		return $out;
 	}
 
 	// ─── Project / session resolution ───────────────────────────
 
-	/** Resolve a loose project query ("dismissed", a name, or a full cwd path) to a projects/ dir. */
+	/**
+	 * Resolve a loose project query ("dismissed", a name, or a full cwd path) to a projects/ dir.
+	 * With several accounts the primary account's dir wins; listProjectSessions()
+	 * folds in the same project from the others.
+	 */
 	public static function resolveProjectDir( string $query ): ?string {
-		$projectsDir = self::claudeDir() . '/projects';
-		if ( ! is_dir( $projectsDir ) ) {
+		$roots = self::projectsDirs();
+		if ( ! $roots ) {
 			return null;
 		}
 
 		// Full cwd path → encode ( / and . both become - ).
 		if ( $query !== '' && $query[0] === '/' ) {
 			$encoded = '-' . str_replace( [ '/', '.' ], '-', ltrim( $query, '/' ) );
-			$dir     = $projectsDir . '/' . $encoded;
-			if ( is_dir( $dir ) ) {
-				return $dir;
+			foreach ( $roots as $root ) {
+				if ( is_dir( $root . '/' . $encoded ) ) {
+					return $root . '/' . $encoded;
+				}
 			}
 		}
 
 		$needle   = strtolower( preg_replace( '/[^a-z0-9]+/i', '', $query ) );
 		$matches  = [];
-		foreach ( scandir( $projectsDir ) as $d ) {
-			if ( $d[0] === '.' ) {
-				continue;
-			}
-			$hay = strtolower( preg_replace( '/[^a-z0-9]+/i', '', $d ) );
-			if ( $needle === '' || str_contains( $hay, $needle ) ) {
-				$count     = count( glob( $projectsDir . '/' . $d . '/*.jsonl' ) );
-				$matches[] = [ 'dir' => $projectsDir . '/' . $d, 'count' => $count, 'len' => strlen( $d ) ];
+		foreach ( $roots as $root ) {
+			foreach ( scandir( $root ) as $d ) {
+				if ( $d[0] === '.' ) {
+					continue;
+				}
+				$hay = strtolower( preg_replace( '/[^a-z0-9]+/i', '', $d ) );
+				if ( $needle === '' || str_contains( $hay, $needle ) ) {
+					$count = count( glob( $root . '/' . $d . '/*.jsonl' ) );
+					if ( isset( $matches[ $d ] ) ) {
+						$matches[ $d ]['count'] += $count;
+					} else {
+						$matches[ $d ] = [ 'dir' => $root . '/' . $d, 'count' => $count, 'len' => strlen( $d ) ];
+					}
+				}
 			}
 		}
 		if ( empty( $matches ) ) {
 			return null;
 		}
 		// Prefer the busiest project; break ties by shortest (most specific) dir name.
+		$matches = array_values( $matches );
 		usort( $matches, fn( $a, $b ) => $b['count'] <=> $a['count'] ?: $a['len'] <=> $b['len'] );
 		return $matches[0]['dir'];
 	}
@@ -68,33 +81,48 @@ class FlowExtractor {
 		if ( strlen( $partial ) < 6 ) {
 			return null;
 		}
-		$projectsDir = self::claudeDir() . '/projects';
-		if ( ! is_dir( $projectsDir ) ) {
-			return null;
-		}
-		foreach ( scandir( $projectsDir ) as $d ) {
-			if ( $d[0] === '.' ) {
-				continue;
-			}
-			// Exact hit first.
-			$exact = $projectsDir . '/' . $d . '/' . $partial . '.jsonl';
-			if ( is_file( $exact ) ) {
-				return $exact;
-			}
-			foreach ( glob( $projectsDir . '/' . $d . '/' . $partial . '*.jsonl' ) as $hit ) {
-				return $hit;
+		foreach ( self::projectsDirs() as $projectsDir ) {
+			foreach ( scandir( $projectsDir ) as $d ) {
+				if ( $d[0] === '.' ) {
+					continue;
+				}
+				// Exact hit first.
+				$exact = $projectsDir . '/' . $d . '/' . $partial . '.jsonl';
+				if ( is_file( $exact ) ) {
+					return $exact;
+				}
+				foreach ( glob( $projectsDir . '/' . $d . '/' . $partial . '*.jsonl' ) as $hit ) {
+					return $hit;
+				}
 			}
 		}
 		return null;
 	}
 
-	/** Every session file in a project dir, sorted by first-message time ascending. */
+	/**
+	 * Every session file in a project dir, plus the same project under any
+	 * other Claude account, sorted by first-message time ascending.
+	 */
 	public static function listProjectSessions( string $dir ): array {
-		$out = [];
-		foreach ( glob( $dir . '/*.jsonl' ) as $file ) {
-			$firstTs = self::firstTimestamp( $file );
-			$out[]   = [ 'id' => basename( $file, '.jsonl' ), 'file' => $file, 'ts' => $firstTs ];
+		$dirs = [ $dir ];
+		foreach ( self::projectsDirs() as $root ) {
+			$sibling = $root . '/' . basename( $dir );
+			if ( $sibling !== $dir && is_dir( $sibling ) ) {
+				$dirs[] = $sibling;
+			}
 		}
+
+		$out = [];
+		foreach ( $dirs as $d ) {
+			foreach ( glob( $d . '/*.jsonl' ) as $file ) {
+				$id = basename( $file, '.jsonl' );
+				if ( isset( $out[ $id ] ) ) {
+					continue;
+				}
+				$out[ $id ] = [ 'id' => $id, 'file' => $file, 'ts' => self::firstTimestamp( $file ) ];
+			}
+		}
+		$out = array_values( $out );
 		usort( $out, fn( $a, $b ) => strcmp( $a['ts'] ?? '', $b['ts'] ?? '' ) );
 		return $out;
 	}

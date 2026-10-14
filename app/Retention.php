@@ -8,8 +8,8 @@
  * data/retention.json.
  *
  * Claude Code is the main case: cleanupPeriodDays in ~/.claude/settings.json
- * (default 30). Other providers either keep sessions forever or have no
- * documented local TTL.
+ * (default 30), read per account when several config dirs exist. Other
+ * providers either keep sessions forever or have no documented local TTL.
  *
  * v1 is read + warn only. Writing agent configs and archive-before-expiry
  * are left for a follow-up.
@@ -140,7 +140,25 @@ class Retention {
 		];
 
 		if ( $sourceId === 'claude' ) {
-			return self::detectClaude( $out );
+			$homes  = ClaudeSessions::homes();
+			$policy = self::detectClaude( $out, $homes[0]['dir'] );
+			if ( count( $homes ) > 1 ) {
+				// Every account runs its own cleanup from its own settings.json.
+				$policy['accounts'] = [];
+				foreach ( $homes as $h ) {
+					$acct = self::detectClaude( $out, $h['dir'] );
+					$policy['accounts'][] = [
+						'account'       => $h['account'],
+						'dir'           => $h['dir'],
+						'days'          => $acct['days'],
+						'source'        => $acct['source'],
+						'settings_path' => $acct['settings_path'],
+						'last_cleanup'  => $acct['last_cleanup'],
+						'note'          => $acct['note'],
+					];
+				}
+			}
+			return $policy;
 		}
 		if ( $sourceId === 'gemini' ) {
 			return self::detectGemini( $out );
@@ -163,11 +181,10 @@ class Retention {
 	}
 
 	/**
-	 * Claude: read cleanupPeriodDays from user settings (default 30).
+	 * Claude: read cleanupPeriodDays from one account's settings (default 30).
 	 * Also surfaces .last-cleanup timestamp when present.
 	 */
-	private static function detectClaude( array $out ): array {
-		$home = self::claudeDir();
+	private static function detectClaude( array $out, string $home ): array {
 		$path = $home . '/settings.json';
 		$out['settings_path'] = $path;
 		$out['default_days']  = 30;
@@ -198,20 +215,32 @@ class Retention {
 		$out['source']       = $source;
 		$out['last_cleanup'] = self::claudeLastCleanup( $home );
 		if ( $source === 'default' ) {
-			$out['note'] = 'Default 30-day cleanup; set cleanupPeriodDays in ~/.claude/settings.json to change';
+			$out['note'] = 'Default 30-day cleanup; set cleanupPeriodDays in ' . self::tildePath( $path ) . ' to change';
 		} else {
 			$out['note'] = 'Claude deletes local transcripts older than this at startup';
 		}
 		return $out;
 	}
 
-	private static function claudeDir(): string {
-		$override = getenv( 'CLAUDE_HOME' );
-		if ( $override ) {
-			return rtrim( $override, '/' );
+	/**
+	 * Policy for one Claude account, keyed by its config dir (null = primary).
+	 */
+	private static function claudeAccountPolicy( ?string $configDir ): array {
+		$base = self::policyFor( 'claude' );
+		if ( ! $configDir ) {
+			return $base;
 		}
-		$home = getenv( 'HOME' ) ?: ( $_SERVER['HOME'] ?? '' );
-		return rtrim( $home, '/' ) . '/.claude';
+		foreach ( $base['accounts'] ?? [] as $acct ) {
+			if ( $acct['dir'] === $configDir ) {
+				return array_merge( $base, [ 'days' => $acct['days'], 'source' => $acct['source'] ] );
+			}
+		}
+		return $base;
+	}
+
+	private static function tildePath( string $path ): string {
+		$home = rtrim( getenv( 'HOME' ) ?: ( $_SERVER['HOME'] ?? '' ), '/' );
+		return $home !== '' && str_starts_with( $path, $home . '/' ) ? '~' . substr( $path, strlen( $home ) ) : $path;
 	}
 
 	private static function claudeLastCleanup( string $home ): ?string {
@@ -350,10 +379,14 @@ class Retention {
 			if ( $src === '' ) {
 				continue;
 			}
-			if ( ! isset( $policies[ $src ] ) ) {
-				$policies[ $src ] = self::policyFor( $src );
+			// Claude accounts each carry their own cleanupPeriodDays.
+			$key = $src === 'claude' ? 'claude|' . ( $s['config_dir'] ?? '' ) : $src;
+			if ( ! isset( $policies[ $key ] ) ) {
+				$policies[ $key ] = $src === 'claude'
+					? self::claudeAccountPolicy( $s['config_dir'] ?? null )
+					: self::policyFor( $src );
 			}
-			$pol = $policies[ $src ];
+			$pol = $policies[ $key ];
 			if ( ( $pol['kind'] ?? '' ) !== 'days' || empty( $pol['days'] ) ) {
 				continue;
 			}
@@ -445,41 +478,30 @@ class Retention {
 
 		$providers = [];
 		foreach ( SessionRegistry::providers() as $id => $class ) {
-			$pol   = self::policyFor( $id );
-			$list  = $bySource[ $id ] ?? [];
-			$total = count( $list );
-			$stats = [
-				'total'       => $total,
-				'expiring'    => 0, // within warning window (incl. expired)
-				'critical'    => 0, // <= 1 day or expired
-				'expired'     => 0,
-				'soonest'     => null, // min days_left when kind=days
-			];
+			$pol  = self::policyFor( $id );
+			$list = $bySource[ $id ] ?? [];
 
-			if ( ( $pol['kind'] ?? '' ) === 'days' ) {
-				$minLeft = null;
-				foreach ( $list as $s ) {
-					if ( ! isset( $s['days_left'] ) ) {
-						continue;
-					}
-					$left = (int) $s['days_left'];
-					if ( $minLeft === null || $left < $minLeft ) {
-						$minLeft = $left;
-					}
-					if ( $left <= $warn ) {
-						$stats['expiring']++;
-					}
-					if ( $left <= 1 ) {
-						$stats['critical']++;
-					}
-					if ( $left < 0 ) {
-						$stats['expired']++;
-					}
+			// One row per Claude account so each shows its own cleanup window.
+			if ( ! empty( $pol['accounts'] ) ) {
+				foreach ( $pol['accounts'] as $acct ) {
+					$dir  = $acct['account'] === '' ? '' : $acct['dir'];
+					$mine = array_filter( $list, fn( $s ) => ( $s['config_dir'] ?? '' ) === $dir );
+					$row  = array_merge( $pol, [
+						'label'         => $pol['label'] . ( $acct['account'] !== '' ? ' · ' . $acct['account'] : '' ),
+						'account'       => $acct['account'],
+						'days'          => $acct['days'],
+						'source'        => $acct['source'],
+						'settings_path' => $acct['settings_path'],
+						'last_cleanup'  => $acct['last_cleanup'],
+						'note'          => $acct['note'],
+					] );
+					unset( $row['accounts'] );
+					$providers[] = array_merge( $row, [ 'stats' => self::policyStats( $row, $mine, $warn ) ] );
 				}
-				$stats['soonest'] = $minLeft;
+				continue;
 			}
 
-			$providers[] = array_merge( $pol, [ 'stats' => $stats ] );
+			$providers[] = array_merge( $pol, [ 'stats' => self::policyStats( $pol, $list, $warn ) ] );
 		}
 
 		// Only providers that currently have sessions, plus any with active day TTL.
@@ -495,6 +517,41 @@ class Retention {
 			'at_risk'   => $atRisk,
 			'generated' => time(),
 		];
+	}
+
+	/**
+	 * Expiry counts for one policy row over its sessions (annotated already).
+	 */
+	private static function policyStats( array $pol, array $list, int $warn ): array {
+		$stats = [
+			'total'       => count( $list ),
+			'expiring'    => 0, // within warning window (incl. expired)
+			'critical'    => 0, // <= 1 day or expired
+			'expired'     => 0,
+			'soonest'     => null, // min days_left when kind=days
+		];
+		if ( ( $pol['kind'] ?? '' ) !== 'days' ) {
+			return $stats;
+		}
+		foreach ( $list as $s ) {
+			if ( ! isset( $s['days_left'] ) ) {
+				continue;
+			}
+			$left = (int) $s['days_left'];
+			if ( $stats['soonest'] === null || $left < $stats['soonest'] ) {
+				$stats['soonest'] = $left;
+			}
+			if ( $left <= $warn ) {
+				$stats['expiring']++;
+			}
+			if ( $left <= 1 ) {
+				$stats['critical']++;
+			}
+			if ( $left < 0 ) {
+				$stats['expired']++;
+			}
+		}
+		return $stats;
 	}
 
 	private static function sessionUnix( array $s ): int {

@@ -262,6 +262,7 @@ function identityBadge(s) {
         : '';
     const label = short ? short + eff : src;
     const tip = [(s && s.sourceLabel) || src];
+    if (s && s.account) tip.push(`account: ${s.account}`);
     if (model && short) tip.push(effort ? `${model} (${effort})` : model);
     return `<span class="inline-block shrink-0 max-w-[7rem] sm:max-w-[11rem] truncate text-[11px] font-mono font-medium px-1.5 py-0.5 rounded border ${colors}" title="${esc(tip.join(' · '))}">${esc(label)}</span>`;
 }
@@ -277,6 +278,18 @@ function agentNameBadge(name) {
     if (!n) return '';
     if (n.toLowerCase() === 'general-purpose') return '';
     return `<span class="hidden sm:inline-block shrink-0 max-w-[8rem] truncate text-[10px] font-mono text-zinc-400 dark:text-cc-dim" title="Agent: ${esc(n)}">${esc(n)}</span>`;
+}
+
+/**
+ * Which Claude Code account a session belongs to, when there is more than one
+ * config dir (CLAUDE_CONFIG_DIR=~/.claude-work). Primary-account rows carry no
+ * account and render nothing, so single-account installs look unchanged.
+ */
+function accountBadge(s) {
+    const a = String((s && s.account) || '').trim();
+    if (!a) return '';
+    const tip = `Claude account: ${a}` + (s.config_dir ? ` (${shortPath(s.config_dir)})` : '');
+    return `<span class="hidden sm:inline-block shrink-0 max-w-[8rem] truncate text-[10px] font-mono text-zinc-400 dark:text-cc-dim" title="${esc(tip)}">@${esc(a)}</span>`;
 }
 
 function shortModelName(model) {
@@ -456,7 +469,7 @@ function resumeCopyTip(source) {
     return 'Copy CLI resume command';
 }
 
-function resumeCommand(source, project, sessionId, environmentId, display) {
+function resumeCommand(source, project, sessionId, environmentId, display, configDir) {
     const cfg = RESUME_BINS[source];
     if (!cfg) return null;
     const shellQuote = value => `'${String(value).replace(/'/g, `'"'"'`)}'`;
@@ -469,7 +482,9 @@ function resumeCommand(source, project, sessionId, environmentId, display) {
         return `open -b ${shellQuote(cfg.bundleId)}  # open thread: ${safeComment}`;
     }
     const cd = project && project !== '-' ? `cd ${shellQuote(project)} && ` : '';
-    return cd + `${cfg.bin} ${cfg.flag ? cfg.flag + ' ' : ''}${cfg.resume} ${shellQuote(sessionId)}`;
+    // A non-primary Claude account resumes from its own config dir.
+    const env = configDir && source === 'claude' ? `CLAUDE_CONFIG_DIR=${shellQuote(configDir)} ` : '';
+    return cd + env + `${cfg.bin} ${cfg.flag ? cfg.flag + ' ' : ''}${cfg.resume} ${shellQuote(sessionId)}`;
 }
 
 const ICON_COPY = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>';
@@ -1473,19 +1488,21 @@ function renderDashboard() {
             list = list.filter(s =>
                 (s.display || '').toLowerCase().includes(q) ||
                 (s.projectName || '').toLowerCase().includes(q) ||
-                (s.project || '').toLowerCase().includes(q)
+                (s.project || '').toLowerCase().includes(q) ||
+                (s.account ? '@' + s.account : '').toLowerCase().includes(q)
             );
         }
         return list;
     }
 
-    function copyBtnHtml(source, project, id, environmentId, display) {
+    function copyBtnHtml(source, project, id, environmentId, display, configDir) {
         if (!RESUME_BINS[source]) return '<span class="w-[26px] shrink-0"></span>';
         const envAttr = environmentId ? ` data-env="${esc(environmentId)}"` : '';
         const titleAttr = display ? ` data-display="${esc(display)}"` : '';
+        const dirAttr = configDir ? ` data-config-dir="${esc(configDir)}"` : '';
         const tip = resumeCopyTip(source);
         return `<button class="copy-resume-btn shrink-0 p-1 rounded text-zinc-300 dark:text-cc-dim opacity-0 group-hover:opacity-100 hover:!text-blue-500 transition-all"
-            data-project="${esc(project || '')}" data-sid="${esc(id)}" data-source="${esc(source)}"${envAttr}${titleAttr} title="${esc(tip)}">${ICON_COPY}</button>`;
+            data-project="${esc(project || '')}" data-sid="${esc(id)}" data-source="${esc(source)}"${envAttr}${titleAttr}${dirAttr} title="${esc(tip)}">${ICON_COPY}</button>`;
     }
 
     function rowHtml(s, showProject) {
@@ -1511,12 +1528,13 @@ function renderDashboard() {
             ${sourceDot(s)}
             <span class="flex-1 min-w-0 truncate text-sm text-zinc-800 dark:text-cc-ink" title="${esc(title)}">${esc(title)}</span>
             ${identityBadge(s)}
+            ${accountBadge(s)}
             ${agentNameBadge(s.agent_name)}
             ${retentionBadge(s, showRetentionBadges())}
             ${showProject ? `<span class="hidden md:block max-w-[240px] truncate text-xs font-mono text-zinc-400 dark:text-cc-dim" title="${esc(shortPath(s.project) || '')}">${esc(projectLabel(s.project) || s.projectName || '')}</span>` : ''}
             <span class="hidden sm:block min-w-[3.5rem] max-w-[6rem] text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap truncate" title="${esc(sessionWeightTitle(s))}">${sessionWeightHtml(s)}</span>
             <span class="text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap" style="width:4.5rem">${s.timestamp_s ? clockTime(s.timestamp_s) : ''}</span>
-            ${copyBtnHtml(src, s.project, s.id, s.environmentId, s.display)}
+            ${copyBtnHtml(src, s.project, s.id, s.environmentId, s.display, s.config_dir)}
         </div>`;
 
         if (expanded && children.length) {
@@ -1667,9 +1685,10 @@ function renderDashboard() {
                 <div class="flex items-center gap-2.5 min-w-0">
                     ${sourceBadge(src, s.sourceLabel)}
                     <span class="flex-1 min-w-0 truncate text-sm font-medium text-zinc-800 dark:text-cc-ink">${esc(s.display || s.id)}</span>
+                    ${accountBadge(s)}
                     <span class="hidden sm:block max-w-[220px] truncate text-xs font-mono text-zinc-400 dark:text-cc-dim" title="${esc(shortPath(s.project) || '')}">${esc(projectLabel(s.project) || s.projectName || '')}</span>
                     <span class="text-xs font-mono text-zinc-400 dark:text-cc-dim whitespace-nowrap shrink-0">${s.timestamp_s ? timeAgo(s.timestamp_s) : ''}</span>
-                    ${copyBtnHtml(src, s.project, s.id, s.environmentId, s.display)}
+                    ${copyBtnHtml(src, s.project, s.id, s.environmentId, s.display, s.config_dir)}
                 </div>
                 <div class="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-cc-mut line-clamp-2">${typeBadge}${s.snippet || ''}</div>
             </div>`;
@@ -1737,7 +1756,8 @@ function renderDashboard() {
                     btn.dataset.project,
                     btn.dataset.sid,
                     btn.dataset.env,
-                    btn.dataset.display
+                    btn.dataset.display,
+                    btn.dataset.configDir
                 );
                 if (cmd) copyWithFlash(btn, cmd);
             });
@@ -2420,6 +2440,7 @@ function renderSessionView(sessionId) {
             if (meta) {
                 const parts = [];
                 if (s.is_subagent || s.parent_id) parts.push('subagent');
+                if (s.account) parts.push('@' + s.account);
                 if (s.live) parts.push(s.live_pid ? `live (pid ${s.live_pid})` : 'live');
                 if (s.model) {
                     const m = shortModelName(s.model) || s.model;
@@ -2489,7 +2510,7 @@ function renderSessionView(sessionId) {
                 exportBtn.addEventListener('click', () => exportSessionHtml(exportBtn, sessionId, s));
             }
 
-            const cmd = resumeCommand(s.source, s.project, sessionId, s.environmentId, s.display);
+            const cmd = resumeCommand(s.source, s.project, sessionId, s.environmentId, s.display, s.config_dir);
             const btn = document.getElementById('session-copy-resume-btn');
             if (cmd && btn) {
                 btn.classList.remove('hidden');

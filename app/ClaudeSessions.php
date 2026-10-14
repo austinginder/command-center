@@ -2,18 +2,98 @@
 
 class ClaudeSessions {
 
-	private static ?string $claudeDir = null;
+	private static ?array $homes = null;
 
 	/**
-	 * Resolve the Claude Code home directory (env override → ~/.claude).
+	 * Every Claude Code config dir on this machine, primary first. Claude Code
+	 * reads CLAUDE_CONFIG_DIR, so a second account usually lives in a sibling
+	 * dir behind a shell alias (CLAUDE_CONFIG_DIR=~/.claude-work claude). Each
+	 * dir has the same layout: its own history.jsonl, projects/ and settings.
+	 *
+	 * CLAUDE_HOMES (colon-separated) replaces discovery. Otherwise the primary
+	 * is CLAUDE_HOME (or ~/.claude) plus any ~/.claude-* dir holding a
+	 * history.jsonl or projects/. The primary account has an empty name; the
+	 * rest are named after their dir (~/.claude-work → "work").
+	 *
+	 * @return array<int,array{dir:string,account:string}>
 	 */
-	private static function claudeDir(): string {
-		if ( self::$claudeDir === null ) {
-			$override = getenv( 'CLAUDE_HOME' );
-			$home     = getenv( 'HOME' ) ?: ( $_SERVER['HOME'] ?? '' );
-			self::$claudeDir = $override ?: $home . '/.claude';
+	public static function homes(): array {
+		if ( self::$homes !== null ) {
+			return self::$homes;
 		}
-		return self::$claudeDir;
+
+		$home = rtrim( getenv( 'HOME' ) ?: ( $_SERVER['HOME'] ?? '' ), '/' );
+		$list = getenv( 'CLAUDE_HOMES' );
+		$dirs = [];
+		if ( $list ) {
+			foreach ( explode( ':', $list ) as $d ) {
+				$d = rtrim( trim( $d ), '/' );
+				if ( $d !== '' ) {
+					$dirs[] = $d;
+				}
+			}
+		} else {
+			$dirs[] = rtrim( getenv( 'CLAUDE_HOME' ) ?: $home . '/.claude', '/' );
+			foreach ( glob( $home . '/.claude-*', GLOB_ONLYDIR ) ?: [] as $d ) {
+				if ( is_file( $d . '/history.jsonl' ) || is_dir( $d . '/projects' ) ) {
+					$dirs[] = $d;
+				}
+			}
+		}
+
+		$homes = [];
+		$names = [];
+		foreach ( array_values( array_unique( $dirs ) ) as $i => $dir ) {
+			$name = $i === 0 ? '' : preg_replace( '/^\.?(claude-)?/', '', basename( $dir ) );
+			if ( $i > 0 && ( $name === '' || isset( $names[ $name ] ) ) ) {
+				$name = basename( $dir );
+			}
+			$names[ $name ] = true;
+			$homes[]        = [ 'dir' => $dir, 'account' => $name ];
+		}
+		return self::$homes = $homes;
+	}
+
+	/**
+	 * The config dir a transcript lives under, or null when it is outside
+	 * every known home.
+	 *
+	 * @return array{dir:string,account:string}|null
+	 */
+	public static function homeForFile( string $file ): ?array {
+		foreach ( self::homes() as $h ) {
+			if ( str_starts_with( $file, $h['dir'] . '/projects/' ) ) {
+				return $h;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Account tags for a session record. Primary-account sessions get none,
+	 * so single-account installs see no change. config_dir drives the resume
+	 * command (CLAUDE_CONFIG_DIR=... claude --resume).
+	 */
+	public static function accountFields( ?array $home ): array {
+		if ( ! $home || $home['account'] === '' ) {
+			return [];
+		}
+		return [
+			'account'    => $home['account'],
+			'config_dir' => $home['dir'],
+		];
+	}
+
+	/**
+	 * Homes to probe for a session, the one named by $configDir first.
+	 */
+	private static function homesFor( ?string $configDir ): array {
+		$homes = self::homes();
+		if ( ! $configDir ) {
+			return $homes;
+		}
+		usort( $homes, fn( $a, $b ) => ( $b['dir'] === $configDir ) <=> ( $a['dir'] === $configDir ) );
+		return $homes;
 	}
 
 	// ─── Provider Contract ──────────────────────────────────────
@@ -61,7 +141,7 @@ class ClaudeSessions {
 	 * indexer notices subagent-only activity and re-extracts usage.
 	 */
 	public static function fingerprint( array $session ): ?array {
-		$file = self::findSessionFile( $session['id'] ?? '', $session['project'] ?? '' );
+		$file = self::findSessionFile( $session['id'] ?? '', $session['project'] ?? '', $session['config_dir'] ?? null );
 		if ( ! $file || ! file_exists( $file ) ) {
 			return null;
 		}
@@ -111,7 +191,7 @@ class ClaudeSessions {
 	 * Concatenates user messages, assistant text, and summaries.
 	 */
 	public static function extractSessionText( array $session ): string {
-		$file = self::findSessionFile( $session['id'] ?? '', $session['project'] ?? '' );
+		$file = self::findSessionFile( $session['id'] ?? '', $session['project'] ?? '', $session['config_dir'] ?? null );
 		if ( ! $file || ! file_exists( $file ) ) {
 			return '';
 		}
@@ -188,7 +268,7 @@ class ClaudeSessions {
 	 * across files so a response echoed in two transcripts counts once.
 	 */
 	public static function extractUsage( array $session ): ?array {
-		$file = self::findSessionFile( $session['id'] ?? '', $session['project'] ?? '' );
+		$file = self::findSessionFile( $session['id'] ?? '', $session['project'] ?? '', $session['config_dir'] ?? null );
 		if ( ! $file || ! file_exists( $file ) ) {
 			return null;
 		}
@@ -269,7 +349,7 @@ class ClaudeSessions {
 	 * even when the main transcript sits quiet waiting on them.
 	 */
 	public static function extractTimings( array $session ): ?array {
-		$file = self::findSessionFile( $session['id'] ?? '', $session['project'] ?? '' );
+		$file = self::findSessionFile( $session['id'] ?? '', $session['project'] ?? '', $session['config_dir'] ?? null );
 		if ( ! $file || ! file_exists( $file ) ) {
 			return null;
 		}
@@ -312,61 +392,69 @@ class ClaudeSessions {
 	// ─── Sessions ───────────────────────────────────────────────
 
 	/**
-	 * List all sessions from ~/.claude/history.jsonl, deduplicated and sorted.
+	 * List all sessions from every account's history.jsonl, deduplicated and
+	 * sorted. A session id found in two homes keeps the first (primary) one.
 	 */
 	public static function listSessions( ?string $project = null ): array {
-		$historyFile = self::claudeDir() . '/history.jsonl';
-		if ( ! file_exists( $historyFile ) ) {
-			return [];
-		}
-
 		$sessions = [];
-		$fp       = fopen( $historyFile, 'r' );
-
-		while ( ( $line = fgets( $fp ) ) !== false ) {
-			$line = trim( $line );
-			if ( $line === '' ) {
+		foreach ( self::homes() as $home ) {
+			$historyFile = $home['dir'] . '/history.jsonl';
+			$fp          = is_file( $historyFile ) ? fopen( $historyFile, 'r' ) : false;
+			if ( ! $fp ) {
 				continue;
 			}
-			$obj = json_decode( $line, true );
-			if ( ! $obj || empty( $obj['sessionId'] ) ) {
-				continue;
-			}
+			$mine = [];
 
-			$sessionProject = $obj['project'] ?? '';
-
-			if ( $project && $sessionProject !== $project ) {
-				continue;
-			}
-
-			$sid     = $obj['sessionId'];
-			$display = trim( (string) ( $obj['display'] ?? '' ) );
-			$ts      = $obj['timestamp'] ?? 0;
-
-			if ( ! isset( $sessions[ $sid ] ) ) {
-				// First non-slash / non-stub prompt is a better session title
-				// than the most recent one (often /quit, /model, "yes").
-				$sessions[ $sid ] = [
-					'id'        => $sid,
-					'display'   => $display,
-					'timestamp' => $ts,
-					'project'   => $sessionProject,
-				];
-			} else {
-				// Timestamp: last entry wins (most recent activity).
-				if ( $ts >= ( $sessions[ $sid ]['timestamp'] ?? 0 ) ) {
-					$sessions[ $sid ]['timestamp'] = $ts;
-					$sessions[ $sid ]['project']   = $sessionProject;
+			while ( ( $line = fgets( $fp ) ) !== false ) {
+				$line = trim( $line );
+				if ( $line === '' ) {
+					continue;
 				}
-				// Title: keep the first good prompt; upgrade a weak one.
-				if ( self::isWeakSessionTitle( $sessions[ $sid ]['display'] ?? '' )
-					&& ! self::isWeakSessionTitle( $display ) ) {
-					$sessions[ $sid ]['display'] = $display;
+				$obj = json_decode( $line, true );
+				if ( ! $obj || empty( $obj['sessionId'] ) ) {
+					continue;
+				}
+
+				$sessionProject = $obj['project'] ?? '';
+
+				if ( $project && $sessionProject !== $project ) {
+					continue;
+				}
+
+				$sid     = $obj['sessionId'];
+				$display = trim( (string) ( $obj['display'] ?? '' ) );
+				$ts      = $obj['timestamp'] ?? 0;
+
+				if ( isset( $sessions[ $sid ] ) && ! isset( $mine[ $sid ] ) ) {
+					continue;
+				}
+				$mine[ $sid ] = true;
+
+				if ( ! isset( $sessions[ $sid ] ) ) {
+					// First non-slash / non-stub prompt is a better session title
+					// than the most recent one (often /quit, /model, "yes").
+					$sessions[ $sid ] = [
+						'id'        => $sid,
+						'display'   => $display,
+						'timestamp' => $ts,
+						'project'   => $sessionProject,
+					] + self::accountFields( $home );
+				} else {
+					// Timestamp: last entry wins (most recent activity).
+					if ( $ts >= ( $sessions[ $sid ]['timestamp'] ?? 0 ) ) {
+						$sessions[ $sid ]['timestamp'] = $ts;
+						$sessions[ $sid ]['project']   = $sessionProject;
+					}
+					// Title: keep the first good prompt; upgrade a weak one.
+					if ( self::isWeakSessionTitle( $sessions[ $sid ]['display'] ?? '' )
+						&& ! self::isWeakSessionTitle( $display ) ) {
+						$sessions[ $sid ]['display'] = $display;
+					}
 				}
 			}
+
+			fclose( $fp );
 		}
-
-		fclose( $fp );
 
 		// Sort by timestamp descending.
 		usort( $sessions, fn( $a, $b ) => $b['timestamp'] - $a['timestamp'] );
@@ -379,7 +467,7 @@ class ClaudeSessions {
 			$s['projectName'] = $s['project'] ? Helpers::projectDisplayName( $s['project'] ) : '';
 			$s['timestamp_s'] = intval( $s['timestamp'] / 1000 ); // JS ms → PHP seconds
 
-			$file = self::findSessionFile( $s['id'], $s['project'] );
+			$file = self::findSessionFile( $s['id'], $s['project'], $s['config_dir'] ?? null );
 			$s['size'] = $file && file_exists( $file ) ? filesize( $file ) : 0;
 
 			// Prefer Claude's generated summary when the history title is weak
@@ -428,7 +516,7 @@ class ClaudeSessions {
 				// Derive project path from encoded project dir name when possible.
 				$project = self::projectPathFromSessionFile( $parentFile );
 			}
-			$child = self::subagentRecord( $parentId, $file, $project );
+			$child = self::subagentRecord( $parentId, $file, $project ) + self::accountFields( self::homeForFile( $file ) );
 			$child['parent_id']   = $parentId;
 			$child['is_subagent'] = true;
 			$child['project']     = $project;
@@ -439,7 +527,7 @@ class ClaudeSessions {
 		// Primary: find in listSessions, then hydrate full children for expand/detail.
 		foreach ( self::listSessions() as $s ) {
 			if ( ( $s['id'] ?? '' ) === $sessionId ) {
-				$kids = self::listSubagents( $sessionId, $s['project'] ?? '' );
+				$kids = self::listSubagents( $sessionId, $s['project'] ?? '', $s['config_dir'] ?? null );
 				if ( $kids ) {
 					$s['children']       = $kids;
 					$s['subagent_count'] = count( $kids );
@@ -462,7 +550,7 @@ class ClaudeSessions {
 			'project'     => $project,
 			'projectName' => $project ? Helpers::projectDisplayName( $project ) : '',
 			'size'        => (int) @filesize( $file ),
-		];
+		] + self::accountFields( self::homeForFile( $file ) );
 		if ( $kids ) {
 			$rec['children']       = $kids;
 			$rec['subagent_count'] = count( $kids );
@@ -471,46 +559,48 @@ class ClaudeSessions {
 	}
 
 	/**
-	 * List unique projects from history.
+	 * List unique projects across every account's history.
 	 * Session counts are unique sessionIds (same as listSessions), not history lines.
 	 */
 	public static function listProjects(): array {
-		$historyFile = self::claudeDir() . '/history.jsonl';
-		if ( ! file_exists( $historyFile ) ) {
-			return [];
-		}
-
 		$projects = [];
 		$seen     = []; // project path => [ sessionId => true ]
-		$fp       = fopen( $historyFile, 'r' );
 
-		while ( ( $line = fgets( $fp ) ) !== false ) {
-			$obj = json_decode( trim( $line ), true );
-			if ( ! $obj || empty( $obj['project'] ) ) {
+		foreach ( self::homes() as $home ) {
+			$historyFile = $home['dir'] . '/history.jsonl';
+			$fp          = is_file( $historyFile ) ? fopen( $historyFile, 'r' ) : false;
+			if ( ! $fp ) {
 				continue;
 			}
-			$p = $obj['project'];
-			if ( ! isset( $projects[ $p ] ) ) {
-				$projects[ $p ] = [
-					'path'     => $p,
-					'name'     => Helpers::projectDisplayName( $p ),
-					'sessions' => 0,
-					'latest'   => 0,
-				];
-				$seen[ $p ] = [];
-			}
-			$sessionId = $obj['sessionId'] ?? '';
-			if ( $sessionId !== '' && ! isset( $seen[ $p ][ $sessionId ] ) ) {
-				$seen[ $p ][ $sessionId ] = true;
-				$projects[ $p ]['sessions']++;
-			}
-			$ts = $obj['timestamp'] ?? 0;
-			if ( $ts > $projects[ $p ]['latest'] ) {
-				$projects[ $p ]['latest'] = $ts;
-			}
-		}
 
-		fclose( $fp );
+			while ( ( $line = fgets( $fp ) ) !== false ) {
+				$obj = json_decode( trim( $line ), true );
+				if ( ! $obj || empty( $obj['project'] ) ) {
+					continue;
+				}
+				$p = $obj['project'];
+				if ( ! isset( $projects[ $p ] ) ) {
+					$projects[ $p ] = [
+						'path'     => $p,
+						'name'     => Helpers::projectDisplayName( $p ),
+						'sessions' => 0,
+						'latest'   => 0,
+					];
+					$seen[ $p ] = [];
+				}
+				$sessionId = $obj['sessionId'] ?? '';
+				if ( $sessionId !== '' && ! isset( $seen[ $p ][ $sessionId ] ) ) {
+					$seen[ $p ][ $sessionId ] = true;
+					$projects[ $p ]['sessions']++;
+				}
+				$ts = $obj['timestamp'] ?? 0;
+				if ( $ts > $projects[ $p ]['latest'] ) {
+					$projects[ $p ]['latest'] = $ts;
+				}
+			}
+
+			fclose( $fp );
+		}
 
 		$result = array_values( $projects );
 		usort( $result, fn( $a, $b ) => $b['latest'] - $a['latest'] );
@@ -691,7 +781,7 @@ class ClaudeSessions {
 		$sessions   = self::listSessions( $project );
 		$sessionMap = [];
 		foreach ( $sessions as $s ) {
-			$file = self::findSessionFile( $s['id'], $s['project'] );
+			$file = self::findSessionFile( $s['id'], $s['project'], $s['config_dir'] ?? null );
 			if ( $file ) {
 				$sessionMap[ realpath( $file ) ] = $s;
 			}
@@ -701,23 +791,27 @@ class ClaudeSessions {
 			return [];
 		}
 
-		// Determine search directory - derive from actual file paths when project-scoped.
-		$searchDir = self::claudeDir() . '/projects';
-		if ( $project && ! empty( $sessionMap ) ) {
-			$firstFile = array_key_first( $sessionMap );
-			$projectDir = dirname( $firstFile );
-			if ( is_dir( $projectDir ) ) {
-				$searchDir = $projectDir;
+		// Search every account's projects/ dir, or just the dirs holding this
+		// project's transcripts when project-scoped (one per account).
+		$searchDirs = [];
+		if ( $project ) {
+			foreach ( array_keys( $sessionMap ) as $f ) {
+				$searchDirs[ dirname( $f ) ] = true;
+			}
+		} else {
+			foreach ( self::homes() as $h ) {
+				$searchDirs[ $h['dir'] . '/projects' ] = true;
 			}
 		}
+		$searchDirs = array_filter( array_keys( $searchDirs ), 'is_dir' );
 
-		if ( ! is_dir( $searchDir ) ) {
+		if ( ! $searchDirs ) {
 			return [];
 		}
 
 		$escaped = escapeshellarg( $query );
-		$dir     = escapeshellarg( $searchDir );
-		$cmd     = "grep -rli {$escaped} {$dir} --include='*.jsonl' 2>/dev/null";
+		$dirs    = implode( ' ', array_map( 'escapeshellarg', $searchDirs ) );
+		$cmd     = "grep -rli {$escaped} {$dirs} --include='*.jsonl' 2>/dev/null";
 		$output  = [];
 		exec( $cmd, $output );
 
@@ -743,7 +837,7 @@ class ClaudeSessions {
 				'size'        => $session['size'],
 				'snippet'     => $snippet['text'] ?? '',
 				'matchType'   => $snippet['type'] ?? 'unknown',
-			];
+			] + array_intersect_key( $session, [ 'account' => 1, 'config_dir' => 1 ] );
 
 			if ( count( $results ) >= 50 ) {
 				break;
@@ -872,27 +966,28 @@ class ClaudeSessions {
 	// ─── File Lookup ─────────────────────────────────────────────
 
 	/**
-	 * Find session file by scanning project dirs.
+	 * Find session file by scanning every account's project dirs.
 	 * Also resolves nested subagent ids ({parent}_agent_{agentId}).
 	 */
-	public static function findSessionFileById( string $sessionId ): ?string {
+	public static function findSessionFileById( string $sessionId, ?string $configDir = null ): ?string {
 		$parsed = self::parseSubagentSessionId( $sessionId );
 		if ( $parsed ) {
 			return self::findSubagentFile( $parsed[0], $parsed[1] );
 		}
 
-		$projectsDir = self::claudeDir() . '/projects';
-		if ( ! is_dir( $projectsDir ) ) {
-			return null;
-		}
-
-		foreach ( scandir( $projectsDir ) as $dir ) {
-			if ( $dir[0] === '.' ) {
+		foreach ( self::homesFor( $configDir ) as $home ) {
+			$projectsDir = $home['dir'] . '/projects';
+			if ( ! is_dir( $projectsDir ) ) {
 				continue;
 			}
-			$file = $projectsDir . '/' . $dir . '/' . $sessionId . '.jsonl';
-			if ( file_exists( $file ) ) {
-				return $file;
+			foreach ( scandir( $projectsDir ) as $dir ) {
+				if ( $dir[0] === '.' ) {
+					continue;
+				}
+				$file = $projectsDir . '/' . $dir . '/' . $sessionId . '.jsonl';
+				if ( file_exists( $file ) ) {
+					return $file;
+				}
 			}
 		}
 
@@ -900,9 +995,9 @@ class ClaudeSessions {
 	}
 
 	/**
-	 * Find session file using known project path.
+	 * Find session file using known project path (and account, when known).
 	 */
-	public static function findSessionFile( string $sessionId, string $project ): ?string {
+	public static function findSessionFile( string $sessionId, string $project, ?string $configDir = null ): ?string {
 		$parsed = self::parseSubagentSessionId( $sessionId );
 		if ( $parsed ) {
 			return self::findSubagentFile( $parsed[0], $parsed[1] );
@@ -910,13 +1005,15 @@ class ClaudeSessions {
 
 		if ( $project ) {
 			$encoded = self::encodeProjectDir( $project );
-			$file    = self::claudeDir() . '/projects/' . $encoded . '/' . $sessionId . '.jsonl';
-			if ( file_exists( $file ) ) {
-				return $file;
+			foreach ( self::homesFor( $configDir ) as $home ) {
+				$file = $home['dir'] . '/projects/' . $encoded . '/' . $sessionId . '.jsonl';
+				if ( file_exists( $file ) ) {
+					return $file;
+				}
 			}
 		}
 
-		return self::findSessionFileById( $sessionId );
+		return self::findSessionFileById( $sessionId, $configDir );
 	}
 
 	/**
@@ -997,8 +1094,8 @@ class ClaudeSessions {
 	 *
 	 * @return array<int,array>
 	 */
-	private static function listSubagents( string $parentId, string $project ): array {
-		$file = self::findSessionFile( $parentId, $project );
+	private static function listSubagents( string $parentId, string $project, ?string $configDir = null ): array {
+		$file = self::findSessionFile( $parentId, $project, $configDir );
 		if ( ! $file ) {
 			return [];
 		}
@@ -1255,11 +1352,11 @@ class ClaudeSessions {
 	 */
 	private static function projectPathFromSessionFile( string $sessionFile ): string {
 		// .../projects/<encoded>/<session>.jsonl  OR  .../projects/<encoded>/<session>/subagents/...
-		$projectsDir = self::claudeDir() . '/projects/';
-		if ( ! str_starts_with( $sessionFile, $projectsDir ) ) {
+		$home = self::homeForFile( $sessionFile );
+		if ( ! $home ) {
 			return '';
 		}
-		$rest = substr( $sessionFile, strlen( $projectsDir ) );
+		$rest = substr( $sessionFile, strlen( $home['dir'] . '/projects/' ) );
 		$enc  = explode( '/', $rest, 2 )[0] ?? '';
 		if ( $enc === '' ) {
 			return '';
