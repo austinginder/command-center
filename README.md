@@ -36,7 +36,7 @@ Tools you don't use are skipped automatically. Each location can be overridden w
 - **Activity heatmap + usage** - GitHub-style sessions-per-day graph with token tooltips; monthly usage page for input / output / cache across providers. Opening a session parks the dashboard DOM so back restores it without refetching.
 - **Token tracking** - recorded usage where tools expose it (including Grok Build `turn_completed.usage`, with parent sessions summing nested subagent bills); estimated usage for Command Code, T3 Code, and Grok Bot.
 - **Runtime tracking** - active time per session computed from transcript timestamps (Claude Code, OpenCode, Codex), with idle gaps over 5 minutes excluded so a chat left open all day reads honestly. Sessions with a 30-minute-plus uninterrupted stretch are flagged as the agent-went-off-and-worked signal, without printing the same figure twice or spending a column: one that ran straight through gets its duration tinted, one that was broken up gets a dotted underline, with the stretch itself named in the tooltip. Active hours roll up on the heatmap tooltips and the usage page.
-- **Retention monitor** - optional per-provider TTL warnings when agent tools auto-delete old transcripts.
+- **Retention monitor** - shows which tools auto-delete old transcripts (Claude Code after 30 days by default, Gemini CLI too) and turns that off in one click: **Keep forever** sets Claude's `cleanupPeriodDays` to 36500 (it rejects 0) or Gemini's `sessionRetention.enabled` to false. Also `command-center retention keep claude`.
 - **Row identity + live state** - one chip per row carries the model, tinted with its tool's colour (Grok Build and Codex include reasoning effort), backed by a source dot on the left rail; a session still running pings that dot. Grok Build adds duration/tools/LOC and context window when signals are present.
 - **Index health** - listed / indexed / skipped / stale coverage in a dashboard popover next to reindex (not in the nav).
 - **Self-update** - nav version chip checks GitHub once a day on dashboard load; Update applies a git pull or the release package. Same engine as `command-center update`.
@@ -125,6 +125,7 @@ POST /api/sessions/search/reindex      rebuild the index
 POST /api/sessions/tokens/backfill     backfill token usage for indexed sessions
 POST /api/sessions/timings/backfill    backfill runtime stats for indexed sessions
 GET  /api/retention                    retention report (?prefer= preferences)
+PUT  /api/retention/keep               turn a tool's cleanup off ({"source":"claude","account":""})
 GET  /stream?session={id}              SSE replay of a session
 ```
 

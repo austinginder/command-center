@@ -114,6 +114,26 @@ if ( $method === 'GET' && $path === '/retention' ) {
 	exit;
 }
 
+// PUT /api/retention/keep - turn a provider's own session cleanup off.
+// PUT + a JSON body forces a CORS preflight, so other sites can't trigger it.
+if ( $method === 'PUT' && $path === '/retention/keep' ) {
+	$site = $_SERVER['HTTP_SEC_FETCH_SITE'] ?? '';
+	$body = json_decode( file_get_contents( 'php://input' ) ?: '', true );
+	if ( ( $site !== '' && $site !== 'same-origin' ) || ! is_array( $body ) || empty( $body['source'] ) ) {
+		http_response_code( 400 );
+		echo json_encode( [ 'error' => 'JSON body with source required' ] );
+		exit;
+	}
+	try {
+		$policy = Retention::keepForever( (string) $body['source'], (string) ( $body['account'] ?? '' ) );
+		echo json_encode( [ 'ok' => true, 'policy' => $policy ] );
+	} catch ( \Throwable $e ) {
+		http_response_code( 500 );
+		echo json_encode( [ 'error' => $e->getMessage() ] );
+	}
+	exit;
+}
+
 // PUT /api/retention/preferences - save CC-side warning prefs (data/retention.json)
 if ( $method === 'PUT' && $path === '/retention/preferences' ) {
 	$raw  = file_get_contents( 'php://input' );

@@ -1012,6 +1012,7 @@ function renderDashboard() {
         if (toggle) toggle.setAttribute('aria-expanded', on ? 'true' : 'false');
     }
 
+    const RETENTION_LONG_DAYS = 3650; // a day policy this long counts as kept
     function renderRetentionStrip() {
         const strip = document.getElementById('retention-strip');
         const rowsEl = document.getElementById('retention-rows');
@@ -1089,7 +1090,7 @@ function renderDashboard() {
             let tail = `${total} session${total === 1 ? '' : 's'}`;
             if (p.kind === 'days' && (p.stats?.expiring || 0) > 0) {
                 tail += ` · ${p.stats.expiring} at risk`;
-            } else if (p.kind === 'days' && p.stats?.soonest !== null && p.stats?.soonest !== undefined) {
+            } else if (p.kind === 'days' && p.days < RETENTION_LONG_DAYS && p.stats?.soonest !== null && p.stats?.soonest !== undefined) {
                 const s = p.stats.soonest;
                 tail += s < 0 ? ' · oldest past cutoff' : ` · soonest ${s}d`;
             }
@@ -1102,9 +1103,42 @@ function renderDashboard() {
                 </span>
                 <span class="${riskCls}">${esc(policyLabel)}</span>
                 <span class="text-zinc-400 dark:text-cc-dim">${esc(tail)}</span>
+                ${keepButton(p)}
             </div>`;
         }).join('');
     }
+
+    // Tools that prune sessions get a one-click switch to keep everything.
+    function keepButton(p) {
+        if (p.kind !== 'days' || !p.writable || (p.days || 0) >= RETENTION_LONG_DAYS) return '';
+        return `<button type="button" class="ret-keep ml-auto shrink-0 px-2 py-0.5 rounded-lg border border-zinc-200 dark:border-cc-line text-zinc-500 dark:text-cc-mut hover:text-zinc-800 dark:hover:text-cc-soft transition-colors" data-source="${esc(p.id)}" data-account="${esc(p.account || '')}" data-path="${esc(p.settings_path || '')}" title="Stop ${esc(p.label || p.id)} deleting old sessions">Keep forever</button>`;
+    }
+
+    // On the rows container: it is rebuilt with each dashboard render, so
+    // listeners never pile up.
+    document.getElementById('retention-rows')?.addEventListener('click', async (e) => {
+        const btn = e.target.closest('.ret-keep');
+        if (!btn) return;
+        const path = btn.dataset.path ? `\n\nThis edits ${btn.dataset.path}.` : '';
+        if (!confirm(`Stop deleting old sessions?${path}`)) return;
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        try {
+            const res = await fetch('/api/retention/keep', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source: btn.dataset.source, account: btn.dataset.account }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+            await loadRetention();
+            if (typeof loadSessions === 'function') loadSessions();
+        } catch (err) {
+            btn.disabled = false;
+            btn.textContent = 'Keep forever';
+            alert(`Could not turn cleanup off: ${err.message}`);
+        }
+    });
 
     function openRetentionModal() {
         const modal = document.getElementById('retention-modal');

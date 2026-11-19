@@ -158,6 +158,19 @@ The `--json` output is designed as an ingest format for a public "browse how it 
 site (GitHub-for-AI-builds): project → span → totals → models → tokens → steering → spine →
 corrections → per-session breakdown.
 
+### retention
+
+Shows which tools delete old sessions on their own, and turns that off.
+
+```bash
+command-center retention                 # each tool's cleanup window
+command-center retention keep claude     # Claude Code: cleanupPeriodDays = 36500
+command-center retention keep claude work   # a second account (~/.claude-work)
+command-center retention keep gemini     # Gemini CLI: sessionRetention.enabled = false
+```
+
+Claude Code rejects `0`, so "keep forever" is a 100-year window. The settings file is edited in place and checked before it is replaced.
+
 ### version
 
 Show the installed version (read from `manifest.json`).

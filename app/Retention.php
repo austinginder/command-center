@@ -11,10 +11,17 @@
  * (default 30), read per account when several config dirs exist. Other
  * providers either keep sessions forever or have no documented local TTL.
  *
- * v1 is read + warn only. Writing agent configs and archive-before-expiry
- * are left for a follow-up.
+ * keepForever() turns a provider's cleanup off from the dashboard or CLI:
+ * Claude gets a 100-year cleanupPeriodDays (it rejects 0), Gemini gets
+ * general.sessionRetention.enabled = false.
  */
 class Retention {
+
+	/** Claude has no "never"; this window outlives any transcript. */
+	public const KEEP_DAYS = 36500;
+
+	/** Below this a day policy counts as pruning worth offering to turn off. */
+	public const LONG_DAYS = 3650;
 
 	/** Built-in profiles when nothing is detected on disk. */
 	private static function builtInProfiles(): array {
@@ -353,6 +360,109 @@ class Retention {
 				return max( 1, $n * 365 );
 		}
 		return null;
+	}
+
+	// ─── Turning cleanup off ──────────────────────────────────
+
+	/**
+	 * Stop a provider deleting local sessions by editing its own settings file.
+	 * $account picks a Claude account ('' = the primary ~/.claude).
+	 *
+	 * @return array The provider's policy after the change.
+	 */
+	public static function keepForever( string $sourceId, string $account = '' ): array {
+		if ( $sourceId === 'claude' ) {
+			foreach ( ClaudeSessions::homes() as $h ) {
+				if ( $h['account'] === $account ) {
+					self::writeClaudeCleanup( $h['dir'] . '/settings.json' );
+					return self::policyFor( 'claude' );
+				}
+			}
+			throw new RuntimeException( 'Unknown Claude account: ' . $account );
+		}
+		if ( $sourceId === 'gemini' ) {
+			self::writeGeminiRetentionOff( self::geminiDir() . '/settings.json' );
+			return self::policyFor( 'gemini' );
+		}
+		throw new RuntimeException( 'No cleanup setting to change for ' . $sourceId );
+	}
+
+	/**
+	 * Set cleanupPeriodDays with a text edit, so the rest of the file keeps
+	 * its formatting and key order. The result is decoded and compared before
+	 * it replaces the original.
+	 */
+	private static function writeClaudeCleanup( string $path ): void {
+		$days = self::KEEP_DAYS;
+		if ( ! is_file( $path ) ) {
+			self::writeAtomic( $path, "{\n  \"cleanupPeriodDays\": {$days}\n}\n" );
+			return;
+		}
+		$raw  = (string) @file_get_contents( $path );
+		$data = json_decode( $raw );
+		if ( ! $data instanceof stdClass ) {
+			throw new RuntimeException( self::tildePath( $path ) . ' is not a JSON object; fix it by hand first' );
+		}
+
+		if ( property_exists( $data, 'cleanupPeriodDays' ) ) {
+			$new = preg_replace( '/("cleanupPeriodDays"\s*:\s*)[^,}\s]+/', '${1}' . $days, $raw, 1 );
+		} elseif ( count( get_object_vars( $data ) ) === 0 ) {
+			$new = "{\n  \"cleanupPeriodDays\": {$days}\n}\n";
+		} else {
+			$indent = preg_match( '/\{\s*\n([ \t]+)"/', $raw, $m ) ? $m[1] : '  ';
+			$new    = preg_replace( '/\{/', "{\n{$indent}\"cleanupPeriodDays\": {$days},", $raw, 1 );
+		}
+
+		$check = json_decode( (string) $new, true );
+		$want  = json_decode( $raw, true );
+		$want['cleanupPeriodDays'] = $days;
+		if ( ! is_array( $check ) || $check != $want ) {
+			throw new RuntimeException( 'Could not edit ' . self::tildePath( $path ) . ' safely; set cleanupPeriodDays by hand' );
+		}
+		self::writeAtomic( $path, (string) $new );
+	}
+
+	/** Gemini: general.sessionRetention.enabled = false, other keys untouched. */
+	private static function writeGeminiRetentionOff( string $path ): void {
+		$data = new stdClass();
+		if ( is_file( $path ) ) {
+			$data = json_decode( (string) @file_get_contents( $path ) );
+			if ( ! $data instanceof stdClass ) {
+				throw new RuntimeException( self::tildePath( $path ) . ' is not a JSON object; fix it by hand first' );
+			}
+		}
+		if ( ! isset( $data->general ) || ! $data->general instanceof stdClass ) {
+			$data->general = new stdClass();
+		}
+		if ( ! isset( $data->general->sessionRetention ) || ! $data->general->sessionRetention instanceof stdClass ) {
+			$data->general->sessionRetention = new stdClass();
+		}
+		$data->general->sessionRetention->enabled = false;
+
+		$json = json_encode( $data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+		if ( $json === false ) {
+			throw new RuntimeException( 'Could not encode ' . self::tildePath( $path ) );
+		}
+		// json_encode indents by four; Gemini writes two.
+		$json = preg_replace_callback( '/^( {4})+/m', fn( $m ) => str_repeat( '  ', strlen( $m[0] ) / 4 ), $json );
+		self::writeAtomic( $path, $json . "\n" );
+	}
+
+	/** Replace a file in one step, keeping its permissions. */
+	private static function writeAtomic( string $path, string $contents ): void {
+		$dir = dirname( $path );
+		if ( ! is_dir( $dir ) ) {
+			throw new RuntimeException( self::tildePath( $dir ) . ' does not exist' );
+		}
+		$tmp = $path . '.cc-' . getmypid();
+		if ( @file_put_contents( $tmp, $contents ) === false ) {
+			throw new RuntimeException( 'Could not write ' . self::tildePath( $path ) );
+		}
+		@chmod( $tmp, is_file( $path ) ? ( fileperms( $path ) & 0777 ) : 0644 );
+		if ( ! @rename( $tmp, $path ) ) {
+			@unlink( $tmp );
+			throw new RuntimeException( 'Could not replace ' . self::tildePath( $path ) );
+		}
 	}
 
 	// ─── Session annotation ───────────────────────────────────

@@ -10,6 +10,7 @@ All notable changes to Command Center are documented here.
 - **Grok Bot provider** - indexes desktop Grok Bot chats from the local `sand-client-persistence` replicas (`~/Library/Application Support/Grok Bot`). One row per sidebar agent (Hunter, MoeBot, ...). Token usage is estimated. Resume opens the Mac app (`com.anysphere.sand`); there is no per-chat deep link.
 
 - **Linux** - runs on Linux (tested on Arch with Cove). Grok Bot chats are read from `~/.config/Grok Bot` (`$XDG_CONFIG_HOME`). Resume commands follow the platform: Codex resumes with `codex resume <id>` (there is no Codex desktop app on Linux), Grok Bot opens with `gtk-launch grok-bot`, and T3 Code names the thread to open. `command-center open` uses `xdg-open`. Antigravity finds projects under `/home` as well as `/Users`.
+- **Keep forever** - the retention monitor can now turn a tool's own session cleanup off: one click on a pruning row (or `command-center retention keep claude`) sets Claude Code's `cleanupPeriodDays` to 36500 (Claude rejects 0) or Gemini CLI's `general.sessionRetention.enabled` to false. Claude settings are edited in place, keeping the file's formatting, and the result is checked before it replaces the original. `command-center retention` lists each tool's cleanup window. New `PUT /api/retention/keep`.
 
 ### Improved
 
