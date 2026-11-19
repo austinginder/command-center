@@ -20,6 +20,11 @@
  */
 class KimiSessions {
 
+	/** Drop what was read from one machine before reading another (see Machines::run()). */
+	public static function forgetMachine(): void {
+		self::$hashMapCache = null;
+	}
+
 	private static ?array $hashMapCache = null;
 
 	// ─── Provider Contract ──────────────────────────────────────
@@ -473,11 +478,11 @@ class KimiSessions {
 	 * Resolve Kimi's home dir. Env override → ~/.kimi.
 	 */
 	public static function dataDir(): string {
-		$override = getenv( 'KIMI_HOME' );
+		$override = Machines::env( 'KIMI_HOME' );
 		if ( $override ) {
 			return rtrim( $override, '/' );
 		}
-		$home = getenv( 'HOME' ) ?: ( $_SERVER['HOME'] ?? '' );
+		$home = Machines::home();
 		return rtrim( $home, '/' ) . '/.kimi';
 	}
 

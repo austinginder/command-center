@@ -287,9 +287,18 @@ function agentNameBadge(name) {
  */
 function accountBadge(s) {
     const a = String((s && s.account) || '').trim();
-    if (!a) return '';
-    const tip = `Claude account: ${a}` + (s.config_dir ? ` (${shortPath(s.config_dir)})` : '');
-    return `<span class="hidden sm:inline-block shrink-0 max-w-[8rem] truncate text-[10px] font-mono text-zinc-400 dark:text-cc-dim" title="${esc(tip)}">@${esc(a)}</span>`;
+    const m = String((s && s.machine) || '').trim();
+    if (!a && !m) return '';
+    const tip = [];
+    if (m) tip.push(`From ${m} (read from its backups)`);
+    if (a) tip.push(`Claude account: ${a}` + (s.config_dir && !m ? ` (${shortPath(s.config_dir)})` : ''));
+    const label = (m ? m : '') + (a ? '@' + a : '');
+    return `<span class="hidden sm:inline-block shrink-0 max-w-[10rem] truncate text-[10px] font-mono text-zinc-400 dark:text-cc-dim" title="${esc(tip.join(' · '))}">${esc(label)}</span>`;
+}
+
+/** Sessions read from another computer's mirror can't be resumed here. */
+function noResumeSlot() {
+    return '<span class="w-[26px] shrink-0"></span>';
 }
 
 function shortModelName(model) {
@@ -1534,7 +1543,8 @@ function renderDashboard() {
                 (s.display || '').toLowerCase().includes(q) ||
                 (s.projectName || '').toLowerCase().includes(q) ||
                 (s.project || '').toLowerCase().includes(q) ||
-                (s.account ? '@' + s.account : '').toLowerCase().includes(q)
+                (s.account ? '@' + s.account : '').toLowerCase().includes(q) ||
+                (s.machine || '').toLowerCase().includes(q)
             );
         }
         return list;
@@ -1579,7 +1589,7 @@ function renderDashboard() {
             ${showProject ? `<span class="hidden md:block max-w-[240px] truncate text-xs font-mono text-zinc-400 dark:text-cc-dim" title="${esc(shortPath(s.project) || '')}">${esc(projectLabel(s.project) || s.projectName || '')}</span>` : ''}
             <span class="hidden sm:block min-w-[3.5rem] max-w-[6rem] text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap truncate" title="${esc(sessionWeightTitle(s))}">${sessionWeightHtml(s)}</span>
             <span class="text-right text-xs font-mono text-zinc-400 dark:text-cc-dim shrink-0 whitespace-nowrap" style="width:4.5rem">${s.timestamp_s ? clockTime(s.timestamp_s) : ''}</span>
-            ${copyBtnHtml(src, s.project, s.id, s.environmentId, s.display, s.config_dir)}
+            ${s.machine ? noResumeSlot() : copyBtnHtml(src, s.project, s.id, s.environmentId, s.display, s.config_dir)}
         </div>`;
 
         if (expanded && children.length) {
@@ -1589,7 +1599,7 @@ function renderDashboard() {
                 const turns = c.turn_count != null ? c.turn_count + (c.turn_count === 1 ? ' turn' : ' turns') : '';
                 const tools = c.tool_calls != null ? c.tool_calls + ' tools' : '';
                 const meta = [c.subagent_type, c.status, dur, turns, tools].filter(Boolean).join(' · ');
-                const childResume = c.resumable === false
+                const childResume = c.resumable === false || s.machine
                     ? '<span class="w-[26px] shrink-0"></span>'
                     : copyBtnHtml(src, c.project || s.project, c.id);
                 html += `
@@ -1733,7 +1743,7 @@ function renderDashboard() {
                     ${accountBadge(s)}
                     <span class="hidden sm:block max-w-[220px] truncate text-xs font-mono text-zinc-400 dark:text-cc-dim" title="${esc(shortPath(s.project) || '')}">${esc(projectLabel(s.project) || s.projectName || '')}</span>
                     <span class="text-xs font-mono text-zinc-400 dark:text-cc-dim whitespace-nowrap shrink-0">${s.timestamp_s ? timeAgo(s.timestamp_s) : ''}</span>
-                    ${copyBtnHtml(src, s.project, s.id, s.environmentId, s.display, s.config_dir)}
+                    ${s.machine ? noResumeSlot() : copyBtnHtml(src, s.project, s.id, s.environmentId, s.display, s.config_dir)}
                 </div>
                 <div class="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-cc-mut line-clamp-2">${typeBadge}${s.snippet || ''}</div>
             </div>`;
@@ -2485,6 +2495,7 @@ function renderSessionView(sessionId) {
             if (meta) {
                 const parts = [];
                 if (s.is_subagent || s.parent_id) parts.push('subagent');
+                if (s.machine) parts.push(s.machine);
                 if (s.account) parts.push('@' + s.account);
                 if (s.live) parts.push(s.live_pid ? `live (pid ${s.live_pid})` : 'live');
                 if (s.model) {
@@ -2555,7 +2566,7 @@ function renderSessionView(sessionId) {
                 exportBtn.addEventListener('click', () => exportSessionHtml(exportBtn, sessionId, s));
             }
 
-            const cmd = resumeCommand(s.source, s.project, sessionId, s.environmentId, s.display, s.config_dir);
+            const cmd = s.machine ? null : resumeCommand(s.source, s.project, sessionId, s.environmentId, s.display, s.config_dir);
             const btn = document.getElementById('session-copy-resume-btn');
             if (cmd && btn) {
                 btn.classList.remove('hidden');

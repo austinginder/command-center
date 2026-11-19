@@ -303,16 +303,16 @@ class GrokBotSessions {
 	}
 
 	public static function dataDir(): string {
-		$override = getenv( 'GROKBOT_HOME' );
+		$override = Machines::env( 'GROKBOT_HOME' );
 		if ( $override ) {
 			return rtrim( $override, '/' );
 		}
-		$home = getenv( 'HOME' ) ?: ( $_SERVER['HOME'] ?? '' );
-		if ( PHP_OS_FAMILY === 'Linux' ) {
-			$config = getenv( 'XDG_CONFIG_HOME' ) ?: rtrim( $home, '/' ) . '/.config';
-			return rtrim( $config, '/' ) . '/Grok Bot';
+		$home = rtrim( Machines::home(), '/' );
+		$xdg  = Machines::env( 'XDG_CONFIG_HOME' );
+		if ( Machines::os() === 'Linux' && $xdg ) {
+			return rtrim( $xdg, '/' ) . '/Grok Bot';
 		}
-		return rtrim( $home, '/' ) . '/Library/Application Support/Grok Bot';
+		return $home . '/' . Machines::grokBotDir( Machines::os() );
 	}
 
 	// ─── Internals ──────────────────────────────────────────────
@@ -343,7 +343,8 @@ class GrokBotSessions {
 	 * @return array{agents: array<string,array>}
 	 */
 	private static function loadIndex(): array {
-		static $cache = null;
+		static $byMachine = [];
+		$cache = &$byMachine[ Machines::key() ];
 		if ( is_array( $cache ) ) {
 			return $cache;
 		}

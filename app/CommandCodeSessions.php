@@ -2,6 +2,11 @@
 
 class CommandCodeSessions {
 
+	/** Drop what was read from one machine before reading another (see Machines::run()). */
+	public static function forgetMachine(): void {
+		self::$cmdDir = null;
+	}
+
 	private static ?string $cmdDir = null;
 
 	/**
@@ -9,8 +14,8 @@ class CommandCodeSessions {
 	 */
 	private static function cmdDir(): string {
 		if ( self::$cmdDir === null ) {
-			$override = getenv( 'COMMANDCODE_HOME' );
-			$home     = getenv( 'HOME' ) ?: ( $_SERVER['HOME'] ?? '' );
+			$override = Machines::env( 'COMMANDCODE_HOME' );
+			$home     = Machines::home();
 			self::$cmdDir = $override ?: $home . '/.commandcode';
 		}
 		return self::$cmdDir;

@@ -171,6 +171,17 @@ command-center retention keep gemini     # Gemini CLI: sessionRetention.enabled 
 
 Claude Code rejects `0`, so "keep forever" is a 100-year window. The settings file is edited in place and checked before it is replaced.
 
+### machines / pull
+
+Sessions from other computers, read from their restic backups (see the README's "Other computers").
+
+```bash
+command-center machines                      # each machine, last pull, snapshot
+command-center pull                          # every machine: newest snapshot, then index
+command-center pull laptop                   # one machine
+command-center pull --backfill --since=2025-01-01   # also older snapshots, one every 14 days
+```
+
 ### version
 
 Show the installed version (read from `manifest.json`).

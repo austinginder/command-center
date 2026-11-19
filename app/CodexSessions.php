@@ -452,11 +452,11 @@ class CodexSessions {
 	// ─── Paths / catalog ────────────────────────────────────────
 
 	public static function dataDir(): string {
-		$override = getenv( 'CODEX_HOME' );
+		$override = Machines::env( 'CODEX_HOME' );
 		if ( $override ) {
 			return rtrim( $override, '/' );
 		}
-		$home = getenv( 'HOME' ) ?: ( $_SERVER['HOME'] ?? '' );
+		$home = Machines::home();
 		return rtrim( $home, '/' ) . '/.codex';
 	}
 
@@ -503,7 +503,8 @@ class CodexSessions {
 
 	/** @return array<string,mixed>|null */
 	private static function threadRow( string $id ): ?array {
-		static $cache = null;
+		static $byMachine = [];
+		$cache = &$byMachine[ Machines::key() ];
 		if ( $cache === null ) {
 			$cache = [];
 			foreach ( self::allThreadRows() as $row ) {
@@ -796,7 +797,8 @@ class CodexSessions {
 	 * @return array<string,array{name:string,updated_ms:int}>
 	 */
 	private static function sessionIndexMap(): array {
-		static $map = null;
+		static $byMachine = [];
+		$map = &$byMachine[ Machines::key() ];
 		if ( $map !== null ) {
 			return $map;
 		}

@@ -15,6 +15,7 @@ require BASE_DIR . '/app/GeminiSessions.php';
 require BASE_DIR . '/app/GrokSessions.php';
 require BASE_DIR . '/app/GrokBotSessions.php';
 require BASE_DIR . '/app/CodexSessions.php';
+require BASE_DIR . '/app/Machines.php';
 require BASE_DIR . '/app/SessionRegistry.php';
 require BASE_DIR . '/app/Retention.php';
 require BASE_DIR . '/app/Updater.php';

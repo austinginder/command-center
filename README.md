@@ -107,6 +107,37 @@ echo 1.8.0 > data/update-simulate
 rm data/update-simulate
 ```
 
+## Other computers
+
+Sessions from your other computers can be searched here too, read from their [restic](https://restic.net) backups. Nothing new runs on the other computer: if it is already backed up with restic (and the backups are never pruned), every session it ever had is in there.
+
+List each one in `data/machines.json`:
+
+```json
+{
+  "machines": [
+    {
+      "name": "laptop",
+      "os": "Darwin",
+      "home": "/Users/me",
+      "restic": {
+        "repository": "rclone:b2:bucket/laptop",
+        "password_command": "secret-tool lookup service restic account laptop",
+        "host": ["Laptop", "Laptop.local"]
+      }
+    }
+  ]
+}
+```
+
+```bash
+command-center pull                  # restore their session folders from the newest snapshot, then index
+command-center pull --backfill --since=2025-01-01   # also recover sessions only older snapshots hold
+command-center machines              # what was pulled, and when
+```
+
+`pull` restores only the session folders (no credentials) into `~/.local/share/command-center/machines/<name>` (`COMMAND_CENTER_MACHINES_DIR`). It only adds and updates files, so a session deleted on the other computer stays searchable here. Their rows carry the machine's name and no resume button. `host` is the snapshot hostname, or a list when it has changed over time. Run `pull` daily after the other computer's backup, for example from a systemd timer or a LaunchAgent.
+
 ## API
 
 Everything the UI does is available as JSON under `/api`:

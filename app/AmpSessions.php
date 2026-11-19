@@ -351,12 +351,12 @@ class AmpSessions {
 	}
 
 	public static function dataDir(): string {
-		$override = getenv( 'AMP_HOME' );
+		$override = Machines::env( 'AMP_HOME' );
 		if ( $override ) {
 			return rtrim( $override, '/' );
 		}
-		$home = getenv( 'HOME' ) ?: ( $_SERVER['HOME'] ?? '' );
-		$xdg  = getenv( 'XDG_DATA_HOME' );
+		$home = Machines::home();
+		$xdg  = Machines::env( 'XDG_DATA_HOME' );
 		return rtrim( $xdg ?: $home . '/.local/share', '/' ) . '/amp';
 	}
 
@@ -477,7 +477,7 @@ class AmpSessions {
 
 	private static function runAmp( array $args ): ?string {
 		$override = getenv( 'AMP_BIN' );
-		$home     = getenv( 'HOME' ) ?: ( $_SERVER['HOME'] ?? '' );
+		$home     = Machines::home();
 		$binary   = $override ?: ( is_executable( $home . '/.local/bin/amp' ) ? $home . '/.local/bin/amp' : 'amp' );
 		$pipes    = [];
 		$process  = @proc_open(

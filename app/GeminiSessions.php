@@ -333,11 +333,11 @@ class GeminiSessions {
 	// ─── Paths ──────────────────────────────────────────────────
 
 	public static function dataDir(): string {
-		$override = getenv( 'GEMINI_HOME' );
+		$override = Machines::env( 'GEMINI_HOME' );
 		if ( $override ) {
 			return rtrim( $override, '/' );
 		}
-		$home = getenv( 'HOME' ) ?: ( $_SERVER['HOME'] ?? '' );
+		$home = Machines::home();
 		return rtrim( $home, '/' ) . '/.gemini';
 	}
 

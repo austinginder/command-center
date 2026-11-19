@@ -2,6 +2,11 @@
 
 class ClaudeSessions {
 
+	/** Drop what was read from one machine before reading another (see Machines::run()). */
+	public static function forgetMachine(): void {
+		self::$homes = null;
+	}
+
 	private static ?array $homes = null;
 
 	/**
@@ -22,8 +27,8 @@ class ClaudeSessions {
 			return self::$homes;
 		}
 
-		$home = rtrim( getenv( 'HOME' ) ?: ( $_SERVER['HOME'] ?? '' ), '/' );
-		$list = getenv( 'CLAUDE_HOMES' );
+		$home = rtrim( Machines::home(), '/' );
+		$list = Machines::env( 'CLAUDE_HOMES' );
 		$dirs = [];
 		if ( $list ) {
 			foreach ( explode( ':', $list ) as $d ) {
@@ -33,7 +38,7 @@ class ClaudeSessions {
 				}
 			}
 		} else {
-			$dirs[] = rtrim( getenv( 'CLAUDE_HOME' ) ?: $home . '/.claude', '/' );
+			$dirs[] = rtrim( Machines::env( 'CLAUDE_HOME' ) ?: $home . '/.claude', '/' );
 			foreach ( glob( $home . '/.claude-*', GLOB_ONLYDIR ) ?: [] as $d ) {
 				if ( is_file( $d . '/history.jsonl' ) || is_dir( $d . '/projects' ) ) {
 					$dirs[] = $d;

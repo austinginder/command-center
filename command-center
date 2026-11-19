@@ -44,6 +44,7 @@ require BASE_DIR . '/app/GeminiSessions.php';
 require BASE_DIR . '/app/GrokSessions.php';
 require BASE_DIR . '/app/GrokBotSessions.php';
 require BASE_DIR . '/app/CodexSessions.php';
+require BASE_DIR . '/app/Machines.php';
 require BASE_DIR . '/app/SessionRegistry.php';
 require BASE_DIR . '/app/Retention.php';
 require BASE_DIR . '/app/SearchIndex.php';
@@ -93,6 +94,10 @@ for ( $i = 0; $i < count( $args ); $i++ ) {
 		$flags['no-color'] = true;
 	} elseif ( $arg === '--no-update' ) {
 		$flags['no-update'] = true;
+	} elseif ( $arg === '--backfill' ) {
+		$flags['backfill'] = true;
+	} elseif ( str_starts_with( $arg, '--since=' ) ) {
+		$flags['since'] = substr( $arg, strlen( '--since=' ) );
 	} elseif ( $arg === '--check' ) {
 		$flags['check'] = true;
 	} elseif ( in_array( $arg, [ '-v', '--version' ], true ) ) {
@@ -110,7 +115,7 @@ $limit    = $flags['limit'] ?? 20;
 
 // ─── Subcommand Dispatch ─────────────────────────────────────
 
-$subcommands = [ 'search', 'reindex', 'status', 'sessions', 'projects', 'open', 'flow', 'retention', 'version', 'update', 'help' ];
+$subcommands = [ 'search', 'reindex', 'status', 'sessions', 'projects', 'open', 'flow', 'retention', 'machines', 'pull', 'version', 'update', 'help' ];
 $subcommand  = 'search';
 $queryParts  = $positional;
 
@@ -145,6 +150,8 @@ try {
 		'open'     => cmdOpen( $queryParts[0] ?? '' ),
 		'flow'     => cmdFlow( $queryParts[0] ?? '', $flags, $useJson, $useColor ),
 		'retention' => cmdRetention( $queryParts, $useJson, $useColor ),
+		'machines' => cmdMachines( $useJson, $useColor ),
+		'pull'     => cmdPull( $queryParts[0] ?? null, $flags, $useJson, $useColor ),
 		'version'  => cmdVersion( $useJson ),
 		'update'   => cmdUpdate( $flags, $useJson, $useColor ),
 		default    => cmdSearch( implode( ' ', $queryParts ), $flags, $limit, $useJson, $useColor, $agent ),
@@ -198,7 +205,8 @@ function cmdSearch( string $query, array $flags, int $limit, bool $useJson, bool
 		$timeAgo  = dim( str_pad( Helpers::timeAgo( $r['timestamp_s'] ), 8 ), $useColor );
 		$display  = bold( $r['display'] ?: $r['id'], $useColor );
 		$snippet  = formatSnippet( $r['snippet'] ?? '', $useColor );
-		$account  = ! empty( $r['account'] ) ? '  ' . dim( '@' . $r['account'], $useColor ) : '';
+		$tag      = ( $r['machine'] ?? '' ) . ( ! empty( $r['account'] ) ? '@' . $r['account'] : '' );
+		$account  = $tag !== '' ? '  ' . dim( $tag, $useColor ) : '';
 
 		echo "  {$project} {$timeAgo} {$display}{$account}\n";
 		if ( $snippet ) {
@@ -276,7 +284,8 @@ function cmdSessions( array $flags, bool $useJson, bool $useColor, ?string $sour
 		$timeAgo = dim( str_pad( Helpers::timeAgo( $s['timestamp_s'] ), 8 ), $useColor );
 		$display = $s['display'] ?: $s['id'];
 		$size    = dim( Helpers::formatBytes( $s['size'] ), $useColor );
-		$account = ! empty( $s['account'] ) ? dim( '@' . $s['account'], $useColor ) . '  ' : '';
+		$tag     = ( $s['machine'] ?? '' ) . ( ! empty( $s['account'] ) ? '@' . $s['account'] : '' );
+		$account = $tag !== '' ? dim( $tag, $useColor ) . '  ' : '';
 		echo "  {$project} {$timeAgo} {$display}  {$account}{$size}\n";
 	}
 
@@ -358,6 +367,79 @@ function cmdRetention( array $args, bool $useJson, bool $useColor ): void {
 			$keep = 'command-center retention keep ' . $p['id'] . ( ! empty( $p['account'] ) ? ' ' . $p['account'] : '' );
 			echo '    ' . dim( 'Turn off: ' . $keep, $useColor ) . "\n";
 		}
+	}
+	exit( 0 );
+}
+
+function cmdMachines( bool $useJson, bool $useColor ): void {
+	$rows = [];
+	foreach ( Machines::remotes() as $m ) {
+		$state  = Machines::state( $m );
+		$rows[] = [
+			'name'       => $m['name'],
+			'os'         => $m['os'],
+			'mirror'     => $m['mirror'],
+			'last_pull'  => $state['last_pull'] ?? null,
+			'snapshot'   => $state['snapshot'] ?? null,
+			'backfilled' => count( $state['backfilled'] ?? [] ),
+		];
+	}
+	if ( $useJson ) {
+		echo json_encode( $rows, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) . "\n";
+		exit( 0 );
+	}
+	if ( ! $rows ) {
+		echo "No other machines. Add them to " . Machines::configPath() . "\n";
+		exit( 0 );
+	}
+	foreach ( $rows as $r ) {
+		$pulled = $r['last_pull'] ? 'pulled ' . Helpers::timeAgo( strtotime( $r['last_pull'] ) ) . ' from ' . $r['snapshot'] : 'never pulled';
+		echo '  ' . bold( str_pad( $r['name'], 16 ), $useColor ) . ' ' . str_pad( $r['os'], 7 ) . ' ' . $pulled
+			. ( $r['backfilled'] ? dim( " · {$r['backfilled']} older snapshots backfilled", $useColor ) : '' ) . "\n";
+		echo '    ' . dim( $r['mirror'], $useColor ) . "\n";
+	}
+	exit( 0 );
+}
+
+function cmdPull( ?string $name, array $flags, bool $useJson, bool $useColor ): void {
+	$machines = $name ? array_filter( [ Machines::find( $name ) ] ) : Machines::remotes();
+	if ( ! $machines ) {
+		fwrite( STDERR, $name ? "Unknown machine: {$name}\n" : "No other machines in " . Machines::configPath() . "\n" );
+		exit( 2 );
+	}
+	$log = $useJson ? null : function ( string $line ) use ( $useColor ) {
+		echo dim( '  ' . str_replace( "\n", "\n  ", $line ), $useColor ) . "\n";
+	};
+	$out = [];
+	foreach ( $machines as $m ) {
+		if ( ! $useJson ) {
+			echo bold( "Pulling {$m['name']}", $useColor ) . "\n";
+		}
+		$row = [ 'machine' => $m['name'] ] + Machines::pull( $m, $log );
+		if ( ! empty( $flags['backfill'] ) ) {
+			$row['backfilled'] = Machines::backfill( $m, 14, $flags['since'] ?? null, $log );
+		}
+		$out[] = $row;
+	}
+
+	// Index what arrived. Sessions still being written index on a later pass.
+	$sessions = SessionRegistry::listSessions( null, null, true );
+	$stale    = array_values( array_filter( SearchIndex::getStaleSessions( $sessions ), function ( $s ) {
+		return ( $s['source'] ?? '' ) !== 'amp' || AmpSessions::canIndexWithoutFetch( $s );
+	} ) );
+	$indexed  = 0;
+	foreach ( array_chunk( $stale, 200 ) as $batch ) {
+		$indexed += SearchIndex::indexSessions( $batch );
+	}
+
+	if ( $useJson ) {
+		echo json_encode( [ 'machines' => $out, 'indexed' => $indexed ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) . "\n";
+	} else {
+		foreach ( $out as $r ) {
+			echo "{$r['machine']}: snapshot {$r['snapshot']} (" . substr( $r['time'], 0, 16 ) . ')'
+				. ( isset( $r['backfilled'] ) ? ", {$r['backfilled']} older snapshots backfilled" : '' ) . "\n";
+		}
+		echo "Indexed {$indexed} new or changed sessions.\n";
 	}
 	exit( 0 );
 }
@@ -813,6 +895,9 @@ Usage:
   command-center open <session-id>          Open in browser
   command-center flow <project>             Reconstruct how a project was built (cliffnotes)
   command-center retention                  Which tools delete old sessions, and how long they keep them
+  command-center machines                   Other computers whose sessions are indexed here
+  command-center pull [machine]             Copy their sessions out of their restic backups, then index
+      --backfill [--since=YYYY-MM-DD]       Also recover sessions only older snapshots hold
   command-center retention keep <tool> [account]
                                             Turn that cleanup off (claude, gemini)
   command-center version                    Show installed version

@@ -486,7 +486,8 @@ class Retention {
 		$policies = [];
 		foreach ( $sessions as $i => $s ) {
 			$src = $s['source'] ?? '';
-			if ( $src === '' ) {
+			// A mirrored machine's copy never expires; only this computer prunes.
+			if ( $src === '' || ! empty( $s['machine'] ) ) {
 				continue;
 			}
 			// Claude accounts each carry their own cleanupPeriodDays.
@@ -577,7 +578,7 @@ class Retention {
 		$bySource = [];
 		foreach ( $sessions as $s ) {
 			$src = $s['source'] ?? '';
-			if ( $src === '' ) {
+			if ( $src === '' || ! empty( $s['machine'] ) ) {
 				continue;
 			}
 			if ( ! isset( $bySource[ $src ] ) ) {

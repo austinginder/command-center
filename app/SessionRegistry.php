@@ -27,6 +27,8 @@
  *   id, display, timestamp (ms), timestamp_s, project (path), projectName, size, source, sourceLabel
  * Optional: account + config_dir on Claude Code sessions from a non-primary
  *   config dir (CLAUDE_CONFIG_DIR accounts, see ClaudeSessions::homes()).
+ * Optional: machine on sessions read from another computer's mirror (see
+ *   Machines). Every call below runs the provider on the session's machine.
  *
  * Project record shape:
  *   path, name, sessions (count), latest (ms), sources[] (added by registry when aggregating)
@@ -66,22 +68,46 @@ class SessionRegistry {
 	 * Cached per request since the same id may be probed multiple times.
 	 */
 	public static function detectSource( string $sessionId ): ?string {
+		return self::locate( $sessionId )['source'] ?? null;
+	}
+
+	/**
+	 * Which machine and provider own a session id. This computer is probed
+	 * first, then each remote machine. Inside Machines::run() only that machine
+	 * is probed. A given $source that no machine claims is assumed local, as
+	 * before machines existed.
+	 *
+	 * @return array{machine:?string,source:string}|null
+	 */
+	public static function locate( string $sessionId, ?string $source = null ): ?array {
 		static $cache = [];
-		if ( array_key_exists( $sessionId, $cache ) ) {
-			return $cache[ $sessionId ];
+		$inside = Machines::current();
+		$key    = ( $inside ?? '*' ) . "\0" . $sessionId . "\0" . ( $source ?? '' );
+		if ( array_key_exists( $key, $cache ) ) {
+			return $cache[ $key ];
 		}
-		foreach ( self::providers() as $id => $class ) {
-			try {
-				if ( method_exists( $class, 'hasSession' ) && $class::hasSession( $sessionId ) ) {
-					$cache[ $sessionId ] = $id;
-					return $id;
+		$machines = $inside !== null ? [ $inside ] : Machines::names();
+		foreach ( $machines as $machine ) {
+			$found = Machines::run( $machine, function () use ( $sessionId, $source, $machine ) {
+				foreach ( self::providers() as $id => $class ) {
+					if ( ( $source && $source !== $id ) || ( $machine !== null && ! Machines::readsRemote( $id ) ) ) {
+						continue;
+					}
+					try {
+						if ( method_exists( $class, 'hasSession' ) && $class::hasSession( $sessionId ) ) {
+							return $id;
+						}
+					} catch ( \Throwable $e ) {
+						// Provider unavailable - skip.
+					}
 				}
-			} catch ( \Throwable $e ) {
-				// Provider unavailable - skip.
+				return null;
+			} );
+			if ( $found ) {
+				return $cache[ $key ] = [ 'machine' => $machine, 'source' => $found ];
 			}
 		}
-		$cache[ $sessionId ] = null;
-		return null;
+		return $cache[ $key ] = $source ? [ 'machine' => $inside, 'source' => $source ] : null;
 	}
 
 	/**
@@ -90,6 +116,15 @@ class SessionRegistry {
 	 * subagent not present in the flat list.
 	 */
 	public static function getSession( string $sessionId, ?string $source = null ): ?array {
+		$machine = self::locate( $sessionId, $source )['machine'] ?? null;
+		$session = Machines::run( $machine, fn() => self::getSessionHere( $sessionId, $source ) );
+		if ( $session && $machine !== null ) {
+			$session['machine'] = $machine;
+		}
+		return $session;
+	}
+
+	private static function getSessionHere( string $sessionId, ?string $source = null ): ?array {
 		$providers = self::providers();
 		if ( $source && isset( $providers[ $source ] ) ) {
 			$class = $providers[ $source ];
@@ -132,7 +167,7 @@ class SessionRegistry {
 
 		$detected = self::detectSource( $sessionId );
 		if ( $detected && $detected !== $source ) {
-			return self::getSession( $sessionId, $detected );
+			return self::getSessionHere( $sessionId, $detected );
 		}
 
 		// Last resort: walk all providers' lists + nested children.
@@ -251,21 +286,38 @@ class SessionRegistry {
 
 	private static function buildSessionList( ?string $project, ?string $source ): array {
 		$results = [];
-		foreach ( self::providers() as $id => $class ) {
-			if ( $source && $source !== $id ) {
-				continue;
-			}
-			try {
-				$sessions = $class::listSessions( $project );
-			} catch ( \Throwable $e ) {
-				continue;
-			}
-			$label = $class::sourceLabel();
-			foreach ( $sessions as $s ) {
-				$s['source']      = $id;
-				$s['sourceLabel'] = $label;
-				$results[]        = $s;
-			}
+		$seen    = [];
+		// This computer first, so a session both machines hold shows as local.
+		foreach ( Machines::names() as $machine ) {
+			Machines::run( $machine, function () use ( $machine, $project, $source, &$results, &$seen ) {
+				foreach ( self::providers() as $id => $class ) {
+					if ( ( $source && $source !== $id ) || ( $machine !== null && ! Machines::readsRemote( $id ) ) ) {
+						continue;
+					}
+					try {
+						$sessions = $class::listSessions( $project );
+					} catch ( \Throwable $e ) {
+						continue;
+					}
+					$label = $class::sourceLabel();
+					foreach ( $sessions as $s ) {
+						$key = $id . "\0" . ( $s['id'] ?? '' );
+						if ( isset( $seen[ $key ] ) ) {
+							continue;
+						}
+						$seen[ $key ]     = true;
+						$s['source']      = $id;
+						$s['sourceLabel'] = $label;
+						if ( $machine !== null ) {
+							$s['machine'] = $machine;
+							foreach ( $s['children'] ?? [] as $i => $child ) {
+								$s['children'][ $i ]['machine'] = $machine;
+							}
+						}
+						$results[] = $s;
+					}
+				}
+			} );
 		}
 		usort( $results, fn( $a, $b ) => ( $b['timestamp'] ?? 0 ) <=> ( $a['timestamp'] ?? 0 ) );
 		return $results;
@@ -282,15 +334,22 @@ class SessionRegistry {
 
 	private static function buildProjectList( ?string $source ): array {
 		$byPath = [];
-		foreach ( self::providers() as $id => $class ) {
-			if ( $source && $source !== $id ) {
-				continue;
-			}
-			try {
-				$projects = $class::listProjects();
-			} catch ( \Throwable $e ) {
-				continue;
-			}
+		$lists  = [];
+		foreach ( Machines::names() as $machine ) {
+			Machines::run( $machine, function () use ( $machine, $source, &$lists ) {
+				foreach ( self::providers() as $id => $class ) {
+					if ( ( $source && $source !== $id ) || ( $machine !== null && ! Machines::readsRemote( $id ) ) ) {
+						continue;
+					}
+					try {
+						$lists[] = [ $id, $class::listProjects() ];
+					} catch ( \Throwable $e ) {
+						continue;
+					}
+				}
+			} );
+		}
+		foreach ( $lists as [ $id, $projects ] ) {
 			foreach ( $projects as $p ) {
 				$key = $p['path'] ?? '';
 				if ( $key === '' ) {
@@ -306,7 +365,10 @@ class SessionRegistry {
 				}
 			}
 		}
-		$result = array_values( $byPath );
+		$result = array_values( array_map( function ( $p ) {
+			$p['sources'] = array_values( array_unique( $p['sources'] ) );
+			return $p;
+		}, $byPath ) );
 		usort( $result, fn( $a, $b ) => ( $b['latest'] ?? 0 ) <=> ( $a['latest'] ?? 0 ) );
 		return $result;
 	}
@@ -315,30 +377,35 @@ class SessionRegistry {
 	 * Fetch a conversation by id. Source is auto-detected when omitted.
 	 */
 	public static function getConversation( string $id, ?string $source = null ): array {
-		$src = $source ?: self::detectSource( $id );
-		if ( ! $src ) {
-			return [];
-		}
-		$class = self::provider( $src );
+		$loc   = self::locate( $id, $source ?: null );
+		$class = $loc ? self::provider( $loc['source'] ) : null;
 		if ( ! $class ) {
 			return [];
 		}
-		return $class::getConversation( $id );
+		return Machines::run( $loc['machine'], fn() => $class::getConversation( $id ) );
+	}
+
+	/** SSE replay of a session (stream.php), on the machine that holds it. */
+	public static function stream( string $id, ?string $source = null ): bool {
+		$loc   = self::locate( $id, $source ?: null );
+		$class = $loc ? self::provider( $loc['source'] ) : null;
+		if ( ! $class ) {
+			return false;
+		}
+		Machines::run( $loc['machine'], fn() => $class::handleStream( $id, 0 ) );
+		return true;
 	}
 
 	/**
 	 * Locate the canonical storage path for a session.
 	 */
 	public static function findSessionFile( string $id, ?string $project = null, ?string $source = null ): ?string {
-		$src = $source ?: self::detectSource( $id );
-		if ( ! $src ) {
-			return null;
-		}
-		$class = self::provider( $src );
+		$loc   = self::locate( $id, $source ?: null );
+		$class = $loc ? self::provider( $loc['source'] ) : null;
 		if ( ! $class ) {
 			return null;
 		}
-		return $class::findSessionFile( $id, $project );
+		return Machines::run( $loc['machine'], fn() => $class::findSessionFile( $id, $project ) );
 	}
 
 	/**
@@ -350,7 +417,7 @@ class SessionRegistry {
 		if ( ! $class ) {
 			return null;
 		}
-		return $class::fingerprint( $session );
+		return Machines::run( $session['machine'] ?? null, fn() => $class::fingerprint( $session ) );
 	}
 
 	/**
@@ -362,7 +429,7 @@ class SessionRegistry {
 		if ( ! $class ) {
 			return '';
 		}
-		return $class::extractSessionText( $session );
+		return Machines::run( $session['machine'] ?? null, fn() => $class::extractSessionText( $session ) );
 	}
 
 	/**
@@ -416,7 +483,7 @@ class SessionRegistry {
 			return null;
 		}
 		try {
-			return $class::extractUsage( $session );
+			return Machines::run( $session['machine'] ?? null, fn() => $class::extractUsage( $session ) );
 		} catch ( \Throwable $e ) {
 			return null;
 		}
@@ -435,7 +502,7 @@ class SessionRegistry {
 			return null;
 		}
 		try {
-			return $class::extractTimings( $session );
+			return Machines::run( $session['machine'] ?? null, fn() => $class::extractTimings( $session ) );
 		} catch ( \Throwable $e ) {
 			return null;
 		}

@@ -923,11 +923,11 @@ class GrokSessions {
 	// ─── Internals ──────────────────────────────────────────────
 
 	public static function dataDir(): string {
-		$override = getenv( 'GROK_HOME' );
+		$override = Machines::env( 'GROK_HOME' );
 		if ( $override ) {
 			return rtrim( $override, '/' );
 		}
-		$home = getenv( 'HOME' ) ?: ( $_SERVER['HOME'] ?? '' );
+		$home = Machines::home();
 		return rtrim( $home, '/' ) . '/.grok';
 	}
 
@@ -1168,8 +1168,10 @@ class GrokSessions {
 	 * @return array<string,array{session_id?:string,pid?:int,cwd?:string,opened_at?:string}>
 	 */
 	private static function activeSessionsMap(): array {
-		static $cached = null;
-		static $cachedAt = 0;
+		static $byMachine = [];
+		$cached   = &$byMachine[ Machines::key() ]['list'];
+		$cachedAt = &$byMachine[ Machines::key() ]['at'];
+		$cachedAt = $cachedAt ?? 0;
 		// Refresh at most every 2s within a request wave.
 		if ( is_array( $cached ) && ( microtime( true ) - $cachedAt ) < 2 ) {
 			return $cached;

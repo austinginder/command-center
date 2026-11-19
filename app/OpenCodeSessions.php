@@ -28,6 +28,13 @@
  */
 class OpenCodeSessions {
 
+	/** Drop what was read from one machine before reading another (see Machines::run()). */
+	public static function forgetMachine(): void {
+		self::$projectsCache = null;
+		self::$dbHandle = null;
+		self::$dbChecked = false;
+	}
+
 	private static ?array $projectsCache = null;
 
 	// ─── Provider Contract ──────────────────────────────────────
@@ -766,13 +773,13 @@ class OpenCodeSessions {
 	 * → ~/.local/share/opencode.
 	 */
 	public static function dataDir(): string {
-		$override = getenv( 'OPENCODE_HOME' );
+		$override = Machines::env( 'OPENCODE_HOME' );
 		if ( $override ) {
 			return rtrim( $override, '/' );
 		}
-		$xdg = getenv( 'XDG_DATA_HOME' );
+		$xdg = Machines::env( 'XDG_DATA_HOME' );
 		if ( ! $xdg ) {
-			$home = getenv( 'HOME' ) ?: ( $_SERVER['HOME'] ?? '' );
+			$home = Machines::home();
 			$xdg  = $home . '/.local/share';
 		}
 		return rtrim( $xdg, '/' ) . '/opencode';

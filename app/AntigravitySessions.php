@@ -2,6 +2,11 @@
 
 class AntigravitySessions {
 
+	/** Drop what was read from one machine before reading another (see Machines::run()). */
+	public static function forgetMachine(): void {
+		self::$cmdDir = null;
+	}
+
 	private static ?string $cmdDir = null;
 
 	/**
@@ -9,8 +14,8 @@ class AntigravitySessions {
 	 */
 	private static function cmdDir(): string {
 		if ( self::$cmdDir === null ) {
-			$override = getenv( 'ANTIGRAVITY_HOME' );
-			$home     = getenv( 'HOME' ) ?: ( $_SERVER['HOME'] ?? '' );
+			$override = Machines::env( 'ANTIGRAVITY_HOME' );
+			$home     = Machines::home();
 			self::$cmdDir = $override ?: $home . '/.gemini/antigravity-cli/brain';
 		}
 		return self::$cmdDir;

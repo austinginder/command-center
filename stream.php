@@ -16,18 +16,8 @@ if ( ! $sessionId ) {
 	exit;
 }
 
-$resolvedSource = $source ?: SessionRegistry::detectSource( $sessionId );
-if ( ! $resolvedSource ) {
+if ( ! SessionRegistry::stream( $sessionId, $source ?: null ) ) {
 	http_response_code( 404 );
 	echo json_encode( [ 'error' => 'Session not found' ] );
 	exit;
 }
-
-$class = SessionRegistry::provider( $resolvedSource );
-if ( ! $class ) {
-	http_response_code( 400 );
-	echo json_encode( [ 'error' => 'Unknown source: ' . $resolvedSource ] );
-	exit;
-}
-
-$class::handleStream( $sessionId, 0 );

@@ -55,6 +55,7 @@ class SearchIndex {
 				ended_at              INTEGER,
 				active_seconds        INTEGER,
 				longest_active_seconds INTEGER,
+				machine      TEXT NOT NULL DEFAULT "",
 				PRIMARY KEY (source, session_id)
 			)
 		' );
@@ -85,6 +86,11 @@ class SearchIndex {
 			$db->exec( 'ALTER TABLE session_files ADD COLUMN ended_at INTEGER' );
 			$db->exec( 'ALTER TABLE session_files ADD COLUMN active_seconds INTEGER' );
 			$db->exec( 'ALTER TABLE session_files ADD COLUMN longest_active_seconds INTEGER' );
+		}
+
+		// Which computer a session came from ("" = this one, see Machines).
+		if ( ! in_array( 'machine', $cols, true ) ) {
+			$db->exec( 'ALTER TABLE session_files ADD COLUMN machine TEXT NOT NULL DEFAULT ""' );
 		}
 
 		$db->exec( 'CREATE INDEX IF NOT EXISTS idx_sf_project   ON session_files(project)' );
@@ -191,11 +197,11 @@ class SearchIndex {
 				INSERT OR REPLACE INTO session_files
 					(session_id, source, file_path, project, project_name, display, timestamp_ms, file_size, file_mtime, indexed_at,
 					 tokens_input, tokens_output, tokens_cache_read, tokens_cache_creation,
-					 started_at, ended_at, active_seconds, longest_active_seconds)
+					 started_at, ended_at, active_seconds, longest_active_seconds, machine)
 				VALUES
 					(:id, :source, :path, :project, :pname, :display, :ts, :size, :mtime, :now,
 					 :tok_in, :tok_out, :tok_cr, :tok_cc,
-					 :t_start, :t_end, :t_active, :t_longest)
+					 :t_start, :t_end, :t_active, :t_longest, :machine)
 			' );
 
 			$ftsDeleteStmt = $db->prepare( 'DELETE FROM sessions_fts WHERE session_id = :id AND source = :source' );
@@ -210,7 +216,7 @@ class SearchIndex {
 					continue;
 				}
 
-				$path = SessionRegistry::findSessionFile( $s['id'] ?? '', $s['project'] ?? null, $source ) ?? '';
+				$path = Machines::run( $s['machine'] ?? null, fn() => SessionRegistry::findSessionFile( $s['id'] ?? '', $s['project'] ?? null, $source ) ) ?? '';
 
 				// Zero (not NULL) when the provider tracks nothing, so the row
 				// isn't endlessly re-visited by backfillUsage() / backfillTimings().
@@ -235,6 +241,7 @@ class SearchIndex {
 				$metaStmt->bindValue( ':t_end',     $timings['ended_at'],               SQLITE3_INTEGER );
 				$metaStmt->bindValue( ':t_active',  $timings['active_seconds'],         SQLITE3_INTEGER );
 				$metaStmt->bindValue( ':t_longest', $timings['longest_active_seconds'], SQLITE3_INTEGER );
+				$metaStmt->bindValue( ':machine',   (string) ( $s['machine'] ?? '' ),   SQLITE3_TEXT );
 				$metaStmt->execute();
 				$metaStmt->reset();
 
@@ -273,7 +280,7 @@ class SearchIndex {
 		}
 
 		$sql = "
-			SELECT sf.session_id, sf.source, sf.project, sf.project_name, sf.display, sf.timestamp_ms, sf.file_size, sf.file_path,
+			SELECT sf.session_id, sf.source, sf.project, sf.project_name, sf.display, sf.timestamp_ms, sf.file_size, sf.file_path, sf.machine,
 			       snippet(sessions_fts, 2, '<mark>', '</mark>', '...', 20) AS snippet
 			FROM sessions_fts
 			JOIN session_files sf
@@ -322,8 +329,12 @@ class SearchIndex {
 				'source'      => $src,
 				'sourceLabel' => $label,
 			];
+			$machine = (string) ( $row['machine'] ?? '' ) ?: null;
+			if ( $machine ) {
+				$results[ count( $results ) - 1 ]['machine'] = $machine;
+			}
 			if ( $src === 'claude' && ! empty( $row['file_path'] ) ) {
-				$results[ count( $results ) - 1 ] += ClaudeSessions::accountFields( ClaudeSessions::homeForFile( $row['file_path'] ) );
+				$results[ count( $results ) - 1 ] += Machines::run( $machine, fn() => ClaudeSessions::accountFields( ClaudeSessions::homeForFile( $row['file_path'] ) ) );
 			}
 		}
 
@@ -523,7 +534,7 @@ class SearchIndex {
 		$start = microtime( true );
 		$db    = self::db();
 
-		$res  = $db->query( 'SELECT session_id, source, project FROM session_files WHERE active_seconds IS NULL LIMIT ' . (int) $limit );
+		$res  = $db->query( 'SELECT session_id, source, project, machine FROM session_files WHERE active_seconds IS NULL LIMIT ' . (int) $limit );
 		$rows = [];
 		while ( $row = $res->fetchArray( SQLITE3_ASSOC ) ) {
 			$rows[] = $row;
@@ -541,6 +552,7 @@ class SearchIndex {
 				'id'      => $row['session_id'],
 				'source'  => $row['source'],
 				'project' => $row['project'],
+				'machine' => $row['machine'] ?: null,
 			] ) ?: [ 'started_at' => 0, 'ended_at' => 0, 'active_seconds' => 0, 'longest_active_seconds' => 0 ];
 
 			$update->bindValue( ':id',        $row['session_id'],                 SQLITE3_TEXT );
@@ -573,7 +585,7 @@ class SearchIndex {
 		$start = microtime( true );
 		$db    = self::db();
 
-		$res  = $db->query( 'SELECT session_id, source, project FROM session_files WHERE tokens_output IS NULL LIMIT ' . (int) $limit );
+		$res  = $db->query( 'SELECT session_id, source, project, machine FROM session_files WHERE tokens_output IS NULL LIMIT ' . (int) $limit );
 		$rows = [];
 		while ( $row = $res->fetchArray( SQLITE3_ASSOC ) ) {
 			$rows[] = $row;
@@ -591,6 +603,7 @@ class SearchIndex {
 				'id'      => $row['session_id'],
 				'source'  => $row['source'],
 				'project' => $row['project'],
+				'machine' => $row['machine'] ?: null,
 			] ) ?: [ 'input' => 0, 'output' => 0, 'cache_read' => 0, 'cache_creation' => 0 ];
 
 			$update->bindValue( ':id',      $row['session_id'],       SQLITE3_TEXT );

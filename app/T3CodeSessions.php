@@ -494,9 +494,9 @@ class T3CodeSessions {
 	 * Resolve the T3 Code home directory (env override → ~/.t3).
 	 */
 	public static function t3Home(): string {
-		$home = getenv( 'T3CODE_HOME' );
+		$home = Machines::env( 'T3CODE_HOME' );
 		if ( ! $home ) {
-			$baseHome = getenv( 'HOME' ) ?: ( $_SERVER['HOME'] ?? '' );
+			$baseHome = Machines::home();
 			$home     = $baseHome . '/.t3';
 		}
 		return rtrim( $home, '/' );
@@ -515,7 +515,8 @@ class T3CodeSessions {
 	 * See pingdotgg/t3code ElectronProtocol + web route _chat.$environmentId.$threadId.
 	 */
 	public static function environmentId(): string {
-		static $cached = null;
+		static $byMachine = [];
+		$cached = &$byMachine[ Machines::key() ];
 		if ( $cached !== null ) {
 			return $cached;
 		}
