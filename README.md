@@ -19,7 +19,7 @@ If you bounce between AI coding CLIs, your conversation history ends up scattere
 | Antigravity | `~/.gemini/antigravity-cli/brain` | - |
 | Gemini CLI | `~/.gemini/tmp` | ✅ |
 | Grok Build | `~/.grok` | ✅ |
-| Grok Bot | `~/Library/Application Support/Grok Bot` | estimated |
+| Grok Bot | `~/Library/Application Support/Grok Bot` (macOS), `~/.config/Grok Bot` (Linux) | estimated |
 | Codex | `~/.codex` (ChatGPT / VS Code Codex) | ✅ |
 
 Tools you don't use are skipped automatically. Each location can be overridden with an env var (`AMP_HOME`, `CLAUDE_HOME`, `OPENCODE_HOME`, `KIMI_HOME`, `COMMANDCODE_HOME`, `T3CODE_HOME`, `ANTIGRAVITY_HOME`, `GEMINI_HOME`, `GROK_HOME`, `GROKBOT_HOME`, `CODEX_HOME`).
@@ -32,7 +32,7 @@ Tools you don't use are skipped automatically. Each location can be overridden w
 - **Deep search** - SQLite FTS5 full-text search across conversation content, with snippets and highlighting. The index updates incrementally; only changed sessions are re-read. Status shows listed / indexed / skipped / stale coverage.
 - **Session viewer** - replay any conversation: user messages, assistant responses, collapsible tool-call groups, and turn summaries. Large sessions paginate (1000 events per page) so the tab stays responsive.
 - **HTML export** - save any conversation as one self-contained HTML file, no assets and no server needed. Defaults to the chat-only view with injected context folded away, and opens in the reader's preferred colour scheme.
-- **Resume commands** - one click copies the exact CLI command to resume a session in its original tool and project directory (OpenCode, Kimi, Claude, Grok, and others; T3, Codex, and Grok Bot open the desktop app).
+- **Resume commands** - one click copies the exact CLI command to resume a session in its original tool and project directory (OpenCode, Kimi, Claude, Grok, and others; T3, Codex, and Grok Bot open the desktop app). On Linux, Codex resumes with `codex resume` and Grok Bot opens with `gtk-launch`.
 - **Activity heatmap + usage** - GitHub-style sessions-per-day graph with token tooltips; monthly usage page for input / output / cache across providers. Opening a session parks the dashboard DOM so back restores it without refetching.
 - **Token tracking** - recorded usage where tools expose it (including Grok Build `turn_completed.usage`, with parent sessions summing nested subagent bills); estimated usage for Command Code, T3 Code, and Grok Bot.
 - **Runtime tracking** - active time per session computed from transcript timestamps (Claude Code, OpenCode, Codex), with idle gaps over 5 minutes excluded so a chat left open all day reads honestly. Sessions with a 30-minute-plus uninterrupted stretch are flagged as the agent-went-off-and-worked signal, without printing the same figure twice or spending a column: one that ran straight through gets its duration tinted, one that was broken up gets a dotted underline, with the stretch itself named in the tooltip. Active hours roll up on the heatmap tooltips and the usage page.
@@ -48,7 +48,7 @@ Command Center is a plain PHP app (PHP 8.1+ with the `sqlite3` extension - no da
 
 ### Recommended: Cove
 
-[Cove](https://cove.run) is a zero-config local dev environment for macOS (Caddy + FrankenPHP). With Cove installed:
+[Cove](https://cove.run) is a zero-config local dev environment for macOS and Linux (Caddy + FrankenPHP). With Cove installed:
 
 ```bash
 cove add command-center --plain

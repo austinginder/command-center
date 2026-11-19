@@ -401,7 +401,7 @@ class AntigravitySessions {
                     }
                     if ($path && is_string($path)) {
                         $path = trim($path, '"\'');
-                        if (str_starts_with($path, '/Users/')) {
+                        if (str_starts_with($path, '/Users/') || str_starts_with($path, '/home/')) {
                             $project = $path;
                             break;
                         }

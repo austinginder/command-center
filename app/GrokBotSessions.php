@@ -6,9 +6,10 @@
  * Closed-source Electron app (bundle id com.anysphere.sand, marketed as
  * Grok Bot). One long-lived chat per sidebar agent (Hunter, MoeBot, ...),
  * not a cwd-scoped coding session. Source of truth is a remote box SQLite
- * store; the Mac client keeps a plaintext JSON replica we can read:
+ * store; the desktop client keeps a plaintext JSON replica we can read:
  *
- *   ~/Library/Application Support/Grok Bot/sand-client-persistence/*.blob
+ *   macOS: ~/Library/Application Support/Grok Bot/sand-client-persistence/*.blob
+ *   Linux: ~/.config/Grok Bot/sand-client-persistence/*.blob ($XDG_CONFIG_HOME)
  *
  * Blob filenames are unpadded RFC 4648 base32 of slice keys such as
  *   sand.client.slice.account.<acct>.roster.last-roster
@@ -307,6 +308,10 @@ class GrokBotSessions {
 			return rtrim( $override, '/' );
 		}
 		$home = getenv( 'HOME' ) ?: ( $_SERVER['HOME'] ?? '' );
+		if ( PHP_OS_FAMILY === 'Linux' ) {
+			$config = getenv( 'XDG_CONFIG_HOME' ) ?: rtrim( $home, '/' ) . '/.config';
+			return rtrim( $config, '/' ) . '/Grok Bot';
+		}
 		return rtrim( $home, '/' ) . '/Library/Application Support/Grok Bot';
 	}
 

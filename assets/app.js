@@ -458,6 +458,15 @@ const RESUME_BINS = {
     grokbot:     { kind: 't3-open-app', bundleId: 'com.anysphere.sand' },
 };
 
+// Linux has no bundle ids. Desktop apps open by their .desktop id, and Codex
+// (no desktop app on Linux) resumes in its CLI, which reads the same rollouts.
+const IS_LINUX = window.CC_PLATFORM === 'Linux';
+if (IS_LINUX) {
+    RESUME_BINS.codex   = { bin: 'codex', flag: '', resume: 'resume' };
+    RESUME_BINS.grokbot = { kind: 't3-open-app', desktopId: 'grok-bot' };
+    RESUME_BINS.t3code  = { kind: 't3-open-app' };
+}
+
 function resumeCopyTip(source) {
     const cfg = RESUME_BINS[source];
     if (cfg && cfg.kind === 't3-open-app') {
@@ -479,7 +488,9 @@ function resumeCommand(source, project, sessionId, environmentId, display, confi
         const label = (display && String(display).trim()) || sessionId;
         const short = label.length > 80 ? label.slice(0, 77) + '...' : label;
         const safeComment = String(short).replace(/\s+/g, ' ').replace(/#/g, '');
-        return `open -b ${shellQuote(cfg.bundleId)}  # open thread: ${safeComment}`;
+        if (cfg.bundleId) return `open -b ${shellQuote(cfg.bundleId)}  # open thread: ${safeComment}`;
+        if (cfg.desktopId) return `gtk-launch ${shellQuote(cfg.desktopId)}  # open thread: ${safeComment}`;
+        return `# open the app, then the thread: ${safeComment}`;
     }
     const cd = project && project !== '-' ? `cd ${shellQuote(project)} && ` : '';
     // A non-primary Claude account resumes from its own config dir.

@@ -9,6 +9,8 @@ All notable changes to Command Center are documented here.
 - **Multiple Claude Code accounts** - every `~/.claude-*` config dir with a `history.jsonl` or `projects/` (the `CLAUDE_CONFIG_DIR=~/.claude-work claude` alias pattern) is indexed alongside `~/.claude` under the one Claude Code source. Rows, search results, session detail, and CLI output tag those sessions `@work` (named after the dir). Resume commands set the matching `CLAUDE_CONFIG_DIR`. The retention monitor shows one row per account with its own `cleanupPeriodDays`, and expiry badges use the right account's window. `command-center flow` folds the same project in from every account. `CLAUDE_HOMES` (colon-separated) overrides discovery.
 - **Grok Bot provider** - indexes desktop Grok Bot chats from the local `sand-client-persistence` replicas (`~/Library/Application Support/Grok Bot`). One row per sidebar agent (Hunter, MoeBot, ...). Token usage is estimated. Resume opens the Mac app (`com.anysphere.sand`); there is no per-chat deep link.
 
+- **Linux** - runs on Linux (tested on Arch with Cove). Grok Bot chats are read from `~/.config/Grok Bot` (`$XDG_CONFIG_HOME`). Resume commands follow the platform: Codex resumes with `codex resume <id>` (there is no Codex desktop app on Linux), Grok Bot opens with `gtk-launch grok-bot`, and T3 Code names the thread to open. `command-center open` uses `xdg-open`. Antigravity finds projects under `/home` as well as `/Users`.
+
 ### Improved
 
 - **Grok Bot source colour** - zinc/charcoal to match the silver-and-black app icon, instead of rose.

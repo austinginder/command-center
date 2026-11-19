@@ -145,6 +145,7 @@ $assetVer = function ( string $path ): string {
 <!-- Main Content -->
 <main id="app" class="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 py-6 pb-12"></main>
 
+<script>window.CC_PLATFORM = <?php echo json_encode( PHP_OS_FAMILY ); ?>;</script>
 <script src="<?php echo $assetVer( '/assets/app.js' ); ?>"></script>
 </body>
 </html>

@@ -314,7 +314,8 @@ function cmdOpen( string $sessionId ): void {
 	}
 
 	$url = 'http://command-center.localhost/sessions/' . urlencode( $sessionId );
-	exec( 'open ' . escapeshellarg( $url ) );
+	$opener = PHP_OS_FAMILY === 'Darwin' ? 'open' : 'xdg-open';
+	exec( $opener . ' ' . escapeshellarg( $url ) . ' >/dev/null 2>&1' );
 	echo "Opened {$sessionId}\n";
 	exit( 0 );
 }
